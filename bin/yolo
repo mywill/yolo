@@ -381,16 +381,17 @@ resolve_image() {
 
     if [ "$has_root_setup" -eq 1 ]; then
         cp "$yolo_dir/root-setup.sh" "$build_dir/root-setup.sh"
-        dockerfile+="COPY root-setup.sh /tmp/root-setup.sh"$'\n'
+        dockerfile+="COPY --chmod=755 root-setup.sh /tmp/root-setup.sh"$'\n'
         dockerfile+="USER root"$'\n'
-        dockerfile+="RUN chmod +x /tmp/root-setup.sh && /tmp/root-setup.sh && rm /tmp/root-setup.sh"$'\n'
+        dockerfile+="RUN /tmp/root-setup.sh"$'\n'
+        dockerfile+="RUN rm -f /tmp/root-setup.sh"$'\n'
         dockerfile+="USER claude"$'\n'
     fi
 
     if [ "$has_user_setup" -eq 1 ]; then
         cp "$yolo_dir/user-setup.sh" "$build_dir/user-setup.sh"
-        dockerfile+="COPY user-setup.sh /tmp/user-setup.sh"$'\n'
-        dockerfile+="RUN chmod +x /tmp/user-setup.sh && /tmp/user-setup.sh && rm /tmp/user-setup.sh"$'\n'
+        dockerfile+="COPY --chmod=755 user-setup.sh /tmp/user-setup.sh"$'\n'
+        dockerfile+="RUN /tmp/user-setup.sh"$'\n'
     fi
 
     echo "$dockerfile" > "$build_dir/Dockerfile"
