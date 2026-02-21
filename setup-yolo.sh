@@ -30,9 +30,11 @@ OPTIONS:
     --packages=PKGS         Extra apt packages to install in the container image
                             (comma or space-separated, requires rebuild)
     --extras=EXTRAS         Predefined extras to include (comma-separated):
+                            node       - Node.js 22 with corepack and pnpm
                             cuda       - NVIDIA CUDA toolkit for building GPU extensions
                                          (experimental)
                             playwright - Playwright with Chromium for browser automation
+                                         (requires node)
                             all        - Enable all extras
 
 EXAMPLES:

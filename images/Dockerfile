@@ -1,5 +1,5 @@
 # Based on Anthropic's official Dockerfile: https://github.com/anthropics/claude-code/blob/07e13937b2d6e798ce1880b22ad6bd22115478e4/.devcontainer/Dockerfile
-FROM node:22
+FROM debian:bookworm
 
 ARG TZ
 ENV TZ="$TZ"
@@ -11,12 +11,15 @@ ARG EXTRA_PACKAGES=""
 
 # Extras (set to "1" to enable)
 ARG EXTRA_CUDA=""
+ARG EXTRA_NODE=""
 ARG EXTRA_PLAYWRIGHT=""
 
 # Install basic development tools
 # tini is included as a minimal init process to properly reap zombie processes
 # when Claude spawns external tools (git, npm, etc.) that may fork children
 RUN apt-get update && apt-get install -y --no-install-recommends \
+  ca-certificates \
+  curl \
   dnsutils \
   fzf \
   gh \
@@ -38,7 +41,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   tree \
   unzip \
   vim \
+  wget \
   zsh \
+  libwebkit2gtk-4.1-dev \
+  build-essential \
+  libssl-dev \
+  libgtk-3-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev gstreamer1.0-plugins-bad libx264-dev \
+  libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install extra packages if specified
@@ -47,8 +58,21 @@ RUN if [ -n "$EXTRA_PACKAGES" ]; then \
       && apt-get clean && rm -rf /var/lib/apt/lists/*; \
     fi
 
+# Install Node.js if enabled
+RUN if [ "$EXTRA_NODE" = "1" ]; then \
+      curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+      apt-get install -y nodejs && \
+      apt-get clean && rm -rf /var/lib/apt/lists/* && \
+      npm install -g corepack && \
+      corepack enable; \
+    fi
+
 # Install Playwright system dependencies if enabled (must be done as root)
+# Requires EXTRA_NODE=1
 RUN if [ "$EXTRA_PLAYWRIGHT" = "1" ]; then \
+      if [ "$EXTRA_NODE" != "1" ]; then \
+        echo "ERROR: EXTRA_PLAYWRIGHT=1 requires EXTRA_NODE=1" >&2; exit 1; \
+      fi; \
       npx playwright install-deps chromium; \
     fi
 
@@ -62,11 +86,9 @@ RUN if [ "$EXTRA_CUDA" = "1" ]; then \
       && apt-get clean && rm -rf /var/lib/apt/lists/*; \
     fi
 
-# Ensure default node user has access to /usr/local/share
-RUN mkdir -p /usr/local/share/npm-global && \
-  chown -R node:node /usr/local/share
-
-ARG USERNAME=node
+# Create non-root user
+ARG USERNAME=claude
+RUN useradd -m -s /bin/zsh $USERNAME
 
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
@@ -78,8 +100,8 @@ RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhisto
 ENV DEVCONTAINER=true
 
 # Create workspace and config directories and set permissions
-RUN mkdir -p /workspace /home/node/.claude && \
-  chown -R node:node /workspace /home/node/.claude
+RUN mkdir -p /workspace /home/claude/.claude && \
+  chown -R claude:claude /workspace /home/claude/.claude
 
 WORKDIR /workspace
 
@@ -90,14 +112,12 @@ RUN ARCH=$(dpkg --print-architecture) && \
   rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
 
 # Set up non-root user
-USER node
+USER claude
 
 # Re-declare ARGs needed after USER switch (ARG values don't persist)
+ARG EXTRA_NODE
 ARG EXTRA_PLAYWRIGHT
-
-# Install global packages
-ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
-ENV PATH=$PATH:/usr/local/share/npm-global/bin
+ARG CLAUDE_CODE_VERSION
 
 # Set the default shell to zsh rather than sh
 ENV SHELL=/bin/zsh
@@ -116,10 +136,22 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
   -a "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
   -x
 
-# Install Claude
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
+  echo 'source "$HOME/.cargo/env"' >> ~/.zshrc && \
+  echo 'source "$HOME/.cargo/env"' >> ~/.bashrc
 
-# Install Playwright and Chromium browser if enabled
+# Add cargo to PATH for this build
+ENV PATH="/home/claude/.cargo/bin:$PATH"
+
+# Prepare pnpm and npm-global paths if Node.js is installed
+RUN if [ "$EXTRA_NODE" = "1" ]; then \
+      corepack prepare pnpm@latest --activate; \
+    fi
+
+# Install Claude Code using native installer
+RUN curl -fsSL https://claude.ai/install.sh | sh -s -- -y ${CLAUDE_CODE_VERSION}
+
+# Install Playwright and Chromium browser if enabled (requires Node.js)
 RUN if [ "$EXTRA_PLAYWRIGHT" = "1" ]; then \
       npm install -g playwright && \
       npx playwright install chromium; \
@@ -130,8 +162,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && \
   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 
-# Add uv to PATH for this build
-ENV PATH="/home/node/.local/bin:$PATH"
+# Add uv and claude to PATH for this build
+ENV PATH="/home/claude/.local/bin:$PATH"
 
 # Install git-annex
 RUN uv tool install git-annex && \
