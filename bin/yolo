@@ -18,6 +18,8 @@ OPTIONS:
                          (default: ask)
     --nvidia             Enable NVIDIA GPU passthrough via CDI
                          Requires nvidia-container-toolkit on host
+    --rebuild            Force rebuild of the project's derived container image
+                         (only relevant when .yolo/ setup scripts exist)
     --no-config          Ignore project configuration file
     --install-config     Create/display .git/yolo/config template
 
@@ -26,9 +28,23 @@ OPTIONS:
 EXAMPLES:
     yolo                              # Basic usage
     yolo --nvidia                     # With GPU support
+    yolo --rebuild                    # Force rebuild project image
     yolo -v /data:/data               # Extra mount
     yolo -- "help with this code"     # Pass args to claude
     yolo --nvidia -- --resume         # GPU + claude args
+
+PER-PROJECT SETUP (.yolo/):
+    Place setup scripts in a .yolo/ directory at the project root to
+    customize the container image with project-specific dependencies.
+
+    .yolo/root-setup.sh  - Runs as root during image build (apt-get, etc.)
+    .yolo/user-setup.sh  - Runs as claude user during image build (rustup, nvm, etc.)
+
+    The derived image is cached based on a hash of the script contents and
+    the base image ID. It is automatically rebuilt when scripts change.
+    Use --rebuild to force a rebuild.
+
+    See images/examples/ for template scripts (rust, python, node, etc.).
 
 NVIDIA GPU SETUP:
     The --nvidia flag uses CDI (Container Device Interface) for GPU access.
@@ -40,7 +56,7 @@ NVIDIA GPU SETUP:
 PROJECT CONFIGURATION:
     Create .git/yolo/config to set per-project defaults.
     Run 'yolo --install-config' to create a template.
-    
+
     The config file is a bash script that can set:
     - YOLO_PODMAN_VOLUMES: array of volume mounts
     - YOLO_PODMAN_OPTIONS: array of podman options
@@ -174,6 +190,7 @@ ENTRYPOINT="claude"
 WORKTREE_MODE="ask"
 USE_NVIDIA=0
 USE_CONFIG=1
+FORCE_REBUILD=0
 
 # Initialize config arrays
 YOLO_PODMAN_VOLUMES=()
@@ -216,6 +233,10 @@ while [ $# -gt 0 ]; do
             ;;
         --no-config)
             USE_CONFIG=0
+            shift
+            ;;
+        --rebuild)
+            FORCE_REBUILD=1
             shift
             ;;
         --)
@@ -306,6 +327,85 @@ if [ "$USE_CONFIG" -eq 1 ]; then
         fi
     fi
 fi
+
+BASE_IMAGE="con-bomination-claude-code"
+
+# Resolve the container image to use, building a derived image if .yolo/ scripts exist
+resolve_image() {
+    local yolo_dir="$(pwd)/.yolo"
+
+    # No .yolo dir or no scripts → use base image directly
+    if [ ! -d "$yolo_dir" ]; then
+        echo "$BASE_IMAGE"
+        return
+    fi
+
+    local has_root_setup=0
+    local has_user_setup=0
+    [ -f "$yolo_dir/root-setup.sh" ] && has_root_setup=1
+    [ -f "$yolo_dir/user-setup.sh" ] && has_user_setup=1
+
+    if [ "$has_root_setup" -eq 0 ] && [ "$has_user_setup" -eq 0 ]; then
+        echo "$BASE_IMAGE"
+        return
+    fi
+
+    # Check that the base image exists
+    if ! podman image exists "$BASE_IMAGE" 2>/dev/null; then
+        echo "Error: Base image '$BASE_IMAGE' not found. Run setup-yolo.sh first." >&2
+        exit 1
+    fi
+
+    # Compute hash from base image ID + script contents
+    local base_id
+    base_id=$(podman image inspect "$BASE_IMAGE" --format '{{.Id}}' 2>/dev/null)
+    local hash_input="$base_id"
+    [ "$has_root_setup" -eq 1 ] && hash_input+=$(cat "$yolo_dir/root-setup.sh")
+    [ "$has_user_setup" -eq 1 ] && hash_input+=$(cat "$yolo_dir/user-setup.sh")
+    local hash
+    hash=$(echo -n "$hash_input" | sha256sum | cut -c1-12)
+    local derived_image="yolo-${hash}"
+
+    # Check cache (skip if --rebuild)
+    if [ "$FORCE_REBUILD" -eq 0 ] && podman image exists "$derived_image" 2>/dev/null; then
+        echo "$derived_image"
+        return
+    fi
+
+    # Build derived image in a temp directory
+    local build_dir
+    build_dir=$(mktemp -d)
+    trap "rm -rf '$build_dir'" EXIT
+
+    local dockerfile="FROM $BASE_IMAGE"$'\n'
+
+    if [ "$has_root_setup" -eq 1 ]; then
+        cp "$yolo_dir/root-setup.sh" "$build_dir/root-setup.sh"
+        dockerfile+="COPY root-setup.sh /tmp/root-setup.sh"$'\n'
+        dockerfile+="USER root"$'\n'
+        dockerfile+="RUN chmod +x /tmp/root-setup.sh && /tmp/root-setup.sh && rm /tmp/root-setup.sh"$'\n'
+        dockerfile+="USER claude"$'\n'
+    fi
+
+    if [ "$has_user_setup" -eq 1 ]; then
+        cp "$yolo_dir/user-setup.sh" "$build_dir/user-setup.sh"
+        dockerfile+="COPY user-setup.sh /tmp/user-setup.sh"$'\n'
+        dockerfile+="RUN chmod +x /tmp/user-setup.sh && /tmp/user-setup.sh && rm /tmp/user-setup.sh"$'\n'
+    fi
+
+    echo "$dockerfile" > "$build_dir/Dockerfile"
+
+    echo "Building project image '$derived_image' from .yolo/ scripts..." >&2
+    if ! podman build -t "$derived_image" "$build_dir" >&2; then
+        echo "Error: Failed to build derived image from .yolo/ scripts" >&2
+        exit 1
+    fi
+    echo "Project image '$derived_image' built successfully." >&2
+
+    echo "$derived_image"
+}
+
+IMAGE_NAME=$(resolve_image)
 
 # Give a meaningful name based on PWD and the PID to help identifying
 # all those podman containers
@@ -432,5 +532,5 @@ podman run --log-driver=none -it --rm \
     -e CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS \
     "${NVIDIA_ARGS[@]}" \
     "${PODMAN_ARGS[@]}" \
-    con-bomination-claude-code \
+    "$IMAGE_NAME" \
     "${CONTAINER_CMD[@]}"

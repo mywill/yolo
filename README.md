@@ -160,7 +160,51 @@ podman run -it --rm \
 
 ## What's Included
 
-The Dockerfile is based on [Anthropic's official setup](https://github.com/anthropics/claude-code/blob/07e13937b2d6e798ce1880b22ad6bd22115478e4/.devcontainer/Dockerfile) and includes Claude Code CLI plus common development tools. See the Dockerfile for the complete list.
+The base image is intentionally minimal — it includes Claude Code CLI, core shell utilities (git, vim, zsh, jq, fzf, etc.), and git-delta. Language runtimes (Rust, Node, Python) and project-specific system libraries are **not** included in the base image. Instead, use `.yolo/` setup scripts to add exactly what each project needs (see below).
+
+See the [Dockerfile](images/Dockerfile) for the complete list of base packages.
+
+## Per-Project Setup
+
+Place setup scripts in a `.yolo/` directory at the root of your project to customize the container image with project-specific dependencies:
+
+```
+your-project/
+  .yolo/
+    root-setup.sh   # Runs as root during image build (apt-get install, etc.)
+    user-setup.sh   # Runs as claude user during image build (rustup, nvm, uv, etc.)
+```
+
+Either script is optional — include only what you need.
+
+**How it works:**
+1. `yolo` detects `.yolo/` scripts and hashes their contents + the base image ID
+2. If a derived image with that hash exists, it's used directly (cache hit)
+3. Otherwise, a new image is built from the base with your scripts applied
+4. Use `--rebuild` to force a rebuild if needed
+
+**Example** — adding Node.js to your project:
+```bash
+mkdir .yolo
+cat > .yolo/user-setup.sh << 'EOF'
+#!/bin/bash
+set -e
+export NVM_DIR="$HOME/.nvm"
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+. "$NVM_DIR/nvm.sh"
+nvm install --lts
+corepack enable
+corepack prepare pnpm@latest --activate
+EOF
+yolo  # builds derived image, then starts claude with node available
+```
+
+See `images/examples/` for ready-to-use templates:
+- **`rust/`** — build-essential, libssl-dev, rustup
+- **`python/`** — uv (Python package manager)
+- **`node/`** — nvm, Node.js LTS, corepack/pnpm
+- **`tauri/`** — WebKit/GTK libs, Rust, Node.js, pnpm
+- **`full/`** — everything (replicates the old monolithic image)
 
 ## Command Breakdown
 
