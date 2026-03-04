@@ -90,6 +90,8 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s -- ${CLAUDE_CODE_VERSION}
 
 ENV PATH="/home/claude/.local/bin:$PATH"
 
+run claude upgrade
+
 # Use tini as init process to properly reap zombie processes
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["claude"]
