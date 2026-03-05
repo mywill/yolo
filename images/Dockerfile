@@ -92,6 +92,9 @@ ENV PATH="/home/claude/.local/bin:$PATH"
 
 run claude upgrade
 
+# Copy entrypoint script that updates Claude Code on every container start
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
+
 # Use tini as init process to properly reap zombie processes
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["claude"]
