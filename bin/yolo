@@ -330,6 +330,17 @@ fi
 
 BASE_IMAGE="con-bomination-claude-code"
 
+# Returns 0 if podman supports the --userns=keep-id:uid=N,gid=N remap syntax (>= 4.3.0).
+podman_supports_keep_id_remap() {
+    local ver
+    ver=$(podman version --format '{{.Client.Version}}' 2>/dev/null) || return 1
+    # Strip any pre-release/build suffix (e.g. "4.9.4-rhel" -> "4.9.4")
+    ver="${ver%%-*}"
+    [ -z "$ver" ] && return 1
+    # Lexicographic compare via sort -V: lowest of {ver, 4.3.0} should be 4.3.0 if ver >= 4.3.0
+    [ "$(printf '%s\n4.3.0\n' "$ver" | sort -V | head -n1)" = "4.3.0" ]
+}
+
 # Resolve the container image to use, building a derived image if .yolo/ scripts exist
 resolve_image() {
     local yolo_dir="$(pwd)/.yolo"
@@ -518,9 +529,21 @@ if [ "$USE_NVIDIA" -eq 1 ]; then
     NVIDIA_ARGS+=(--security-opt "label=disable")
 fi
 
+# Map host user to in-container UID/GID 1000 (the pinned claude user).
+# podman >= 4.3 supports keep-id:uid=N,gid=N which handles this directly.
+# Older podman (e.g. Ubuntu 22.04 ships 3.4) needs the legacy --user= form,
+# which only works correctly when the host UID is also 1000.
+if podman_supports_keep_id_remap; then
+    USERNS_ARGS=(--userns=keep-id:uid=1000,gid=1000)
+else
+    USERNS_ARGS=(--user="$(id -u):$(id -g)" --userns=keep-id)
+    if [ "$(id -u)" != "1000" ]; then
+        echo "Warning: podman <4.3 detected with host UID $(id -u). File ownership inside the container may be incorrect. Upgrade podman to 4.3+ for proper non-1000 UID support." >&2
+    fi
+fi
+
 podman run --log-driver=none -it --rm \
-    --user="$(id -u):$(id -g)"\
-    --userns=keep-id \
+    "${USERNS_ARGS[@]}" \
     --name="$name" \
     -v "$CLAUDE_MOUNT" \
     -v "$HOME/.gitconfig:/tmp/.gitconfig:ro,Z" \

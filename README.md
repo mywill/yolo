@@ -130,7 +130,7 @@ Then run (with original host paths preserved by default):
 
 ```bash
 podman run -it --rm \
-  --userns=keep-id \
+  --userns=keep-id:uid=1000,gid=1000 \
   -v "$HOME/.claude:$HOME/.claude:Z" \
   -v ~/.gitconfig:/tmp/.gitconfig:ro,Z \
   -v "$(pwd):$(pwd):Z" \
@@ -145,7 +145,7 @@ Or with anonymized paths (old behavior):
 
 ```bash
 podman run -it --rm \
-  --userns=keep-id \
+  --userns=keep-id:uid=1000,gid=1000 \
   -v ~/.claude:/claude:Z \
   -v ~/.gitconfig:/tmp/.gitconfig:ro,Z \
   -v "$(pwd):/workspace:Z" \
@@ -155,6 +155,8 @@ podman run -it --rm \
   con-bomination-claude-code \
   claude --dangerously-skip-permissions
 ```
+
+> **Note**: `--userns=keep-id:uid=1000,gid=1000` requires podman ≥ 4.3 (Nov 2022). On older podman (e.g. Ubuntu 22.04 ships 3.4), substitute `--user="$(id -u):$(id -g)" --userns=keep-id` — file ownership only round-trips correctly when your host UID is 1000. The `yolo` script handles this fallback automatically.
 
 ⚠️ **Note**: This uses `--dangerously-skip-permissions` to bypass all permission prompts. This is safe in containerized environments where the container provides isolation from your host system.
 
@@ -210,7 +212,7 @@ See `images/examples/` for ready-to-use templates:
 
 ### Default Behavior (Preserved Host Paths)
 
-- `--userns=keep-id`: Maps your host user ID inside the container so files are owned correctly
+- `--userns=keep-id:uid=1000,gid=1000`: Maps your host user to the in-container `claude` user (UID/GID 1000) so files in bind mounts are owned correctly on the host regardless of your host UID (requires podman ≥ 4.3)
 - `-v "$HOME/.claude:$HOME/.claude:Z"`: Bind mounts your Claude configuration directory at its original path with SELinux relabeling
 - `-v ~/.gitconfig:/tmp/.gitconfig:ro,Z`: Mounts git config read-only for commits (push operations not supported)
 - `-v "$(pwd):$(pwd):Z"`: Bind mounts your current working directory at its original path
@@ -242,7 +244,7 @@ When using `--anonymized-paths`, paths are mapped to generic container locations
 
    **Note**: With `--anonymized-paths`, all projects appear to be in `/workspace`, which allows `claude --continue` to retain context across different projects that were also run with this flag. This can be useful for maintaining conversation context when working on related codebases.
 
-3. **File ownership**: The `--userns=keep-id` flag ensures files created or modified inside the container will be owned by your host user, regardless of your UID
+3. **File ownership**: The `--userns=keep-id:uid=1000,gid=1000` flag maps the in-container `claude` user (UID 1000) back to your host user, so files created inside the container are owned by your host user — regardless of what your host UID is
 
 4. **Git operations**: Git config is mounted read-only, so Claude Code can read your identity and make commits. However, **SSH keys are not mounted**, so `git push` operations will fail. You'll need to push from your host after Claude Code commits your changes.
 
@@ -260,7 +262,7 @@ When using `--anonymized-paths`, paths are mapped to generic container locations
 YOLO mode runs Claude Code with `--dangerously-skip-permissions`, providing unrestricted command execution within the container. The container provides isolation through:
 
 - **Filesystem boundaries**: Only `~/.claude`, `~/.gitconfig`, and your current working directory are accessible to Claude
-- **Process isolation**: Rootless podman user namespace isolation (`--userns=keep-id`)
+- **Process isolation**: Rootless podman user namespace isolation (`--userns=keep-id:uid=1000,gid=1000`)
 - **Limited host access**: SSH keys and other sensitive files are not mounted
 
 **What is NOT restricted:**

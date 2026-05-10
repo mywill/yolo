@@ -181,7 +181,7 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo
     echo "Setup complete! Container image is ready."
     echo "Run manually with preserved host paths (default):"
-    echo "  podman run -it --rm --userns=keep-id \\"
+    echo "  podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \\"
     echo "    -v ~/.claude:~/.claude:Z \\"
     echo "    -v ~/.gitconfig:/tmp/.gitconfig:ro,Z \\"
     echo "    -v \"\$(pwd):\$(pwd):Z\" \\"
@@ -192,7 +192,7 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo "    claude --dangerously-skip-permissions"
     echo
     echo "Or with anonymized paths (/claude, /workspace):"
-    echo "  podman run -it --rm --userns=keep-id \\"
+    echo "  podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \\"
     echo "    -v ~/.claude:/claude:Z \\"
     echo "    -v ~/.gitconfig:/tmp/.gitconfig:ro,Z \\"
     echo "    -v \"\$(pwd):/workspace:Z\" \\"
@@ -201,6 +201,10 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo "    -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \\"
     echo "    $IMAGE_NAME \\"
     echo "    claude --dangerously-skip-permissions"
+    echo
+    echo "Note: --userns=keep-id:uid=1000,gid=1000 requires podman >= 4.3."
+    echo "On older podman use --user=\"\$(id -u):\$(id -g)\" --userns=keep-id instead"
+    echo "(file ownership only works correctly if your host UID is 1000)."
     echo
     echo "Pass extra podman options and claude arguments like:"
     echo "  podman run ... [podman-options] $IMAGE_NAME claude [claude-args]"

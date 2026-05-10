@@ -39,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Create non-root user
 ARG USERNAME=claude
-RUN useradd -m -s /bin/zsh $USERNAME
+RUN useradd -m -u 1000 -U -s /bin/zsh $USERNAME
 
 # Persist bash history.
 RUN SNIPPET="export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/.bash_history" \
