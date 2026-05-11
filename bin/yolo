@@ -507,8 +507,10 @@ fi
 
 # Build the command to run inside the container
 if [ "$ENTRYPOINT" = "claude" ]; then
-    # Default: run claude with --dangerously-skip-permissions
-    CONTAINER_CMD=("claude" "--dangerously-skip-permissions" "${CLAUDE_ARGS[@]}")
+    # Reuse the podman container name as the claude session display name so the
+    # two share an identifier and the session is easy to find in /resume.
+    # Placed before CLAUDE_ARGS so a user-supplied --name in CLAUDE_ARGS wins.
+    CONTAINER_CMD=("claude" "--dangerously-skip-permissions" "--name=$name" "${CLAUDE_ARGS[@]}")
 else
     # Custom entrypoint: run as-is with any additional args
     CONTAINER_CMD=("$ENTRYPOINT" "${CLAUDE_ARGS[@]}")
