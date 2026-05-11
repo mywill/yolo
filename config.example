@@ -10,9 +10,9 @@
 # Array of volumes to mount into the container
 # 
 # Syntax options:
-#   "~/projects"              -> ~/projects:~/projects:Z (1-to-1 mount)
-#   "~/projects::ro"          -> ~/projects:~/projects:ro,Z (1-to-1 with options)
-#   "~/data:/data:Z"          -> ~/data:/data:Z (explicit mapping)
+#   "~/projects"              -> ~/projects:~/projects:z (1-to-1 mount)
+#   "~/projects::ro"          -> ~/projects:~/projects:ro,z (1-to-1 with options)
+#   "~/data:/data:z"          -> ~/data:/data:z (explicit mapping)
 #
 # The shorthand syntax makes it easy to mount directories at the same path
 # in both host and container.
@@ -21,7 +21,7 @@
 YOLO_PODMAN_VOLUMES=(
     # "~/projects"              # Mount ~/projects at same path in container
     # "~/data::ro"              # Mount ~/data read-only at same path
-    # "/mnt/storage:/storage:Z" # Explicit host:container:options
+    # "/mnt/storage:/storage:z" # Explicit host:container:options
 )
 
 # ============================================================================

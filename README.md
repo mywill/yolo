@@ -97,9 +97,9 @@ USE_NVIDIA=1
 ```
 
 **Volume shorthand syntax:**
-- `"~/projects"` → `~/projects:~/projects:Z` (1-to-1 mount)
-- `"~/data::ro"` → `~/data:~/data:ro,Z` (1-to-1 with options)
-- `"~/data:/data:Z"` → `~/data:/data:Z` (explicit, unchanged)
+- `"~/projects"` → `~/projects:~/projects:z` (1-to-1 mount)
+- `"~/data::ro"` → `~/data:~/data:ro,z` (1-to-1 with options)
+- `"~/data:/data:z"` → `~/data:/data:z` (explicit, unchanged)
 
 Command line options always override configuration file settings. Use `--no-config` to ignore the configuration file entirely.
 
@@ -131,9 +131,9 @@ Then run (with original host paths preserved by default):
 ```bash
 podman run -it --rm \
   --userns=keep-id:uid=1000,gid=1000 \
-  -v "$HOME/.claude:$HOME/.claude:Z" \
-  -v ~/.gitconfig:/tmp/.gitconfig:ro,Z \
-  -v "$(pwd):$(pwd):Z" \
+  -v "$HOME/.claude:$HOME/.claude:z" \
+  -v ~/.gitconfig:/tmp/.gitconfig:ro,z \
+  -v "$(pwd):$(pwd):z" \
   -w "$(pwd)" \
   -e CLAUDE_CONFIG_DIR="$HOME/.claude" \
   -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \
@@ -146,9 +146,9 @@ Or with anonymized paths (old behavior):
 ```bash
 podman run -it --rm \
   --userns=keep-id:uid=1000,gid=1000 \
-  -v ~/.claude:/claude:Z \
-  -v ~/.gitconfig:/tmp/.gitconfig:ro,Z \
-  -v "$(pwd):/workspace:Z" \
+  -v ~/.claude:/claude:z \
+  -v ~/.gitconfig:/tmp/.gitconfig:ro,z \
+  -v "$(pwd):/workspace:z" \
   -w /workspace \
   -e CLAUDE_CONFIG_DIR=/claude \
   -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \
@@ -213,9 +213,9 @@ See `images/examples/` for ready-to-use templates:
 ### Default Behavior (Preserved Host Paths)
 
 - `--userns=keep-id:uid=1000,gid=1000`: Maps your host user to the in-container `claude` user (UID/GID 1000) so files in bind mounts are owned correctly on the host regardless of your host UID (requires podman ≥ 4.3)
-- `-v "$HOME/.claude:$HOME/.claude:Z"`: Bind mounts your Claude configuration directory at its original path with SELinux relabeling
-- `-v ~/.gitconfig:/tmp/.gitconfig:ro,Z`: Mounts git config read-only for commits (push operations not supported)
-- `-v "$(pwd):$(pwd):Z"`: Bind mounts your current working directory at its original path
+- `-v "$HOME/.claude:$HOME/.claude:z"`: Bind mounts your Claude configuration directory at its original path with shared SELinux relabeling
+- `-v ~/.gitconfig:/tmp/.gitconfig:ro,z`: Mounts git config read-only for commits (push operations not supported)
+- `-v "$(pwd):$(pwd):z"`: Bind mounts your current working directory at its original path
 - `-w "$(pwd)"`: Sets the working directory inside the container to match your host path
 - `-e CLAUDE_CONFIG_DIR="$HOME/.claude"`: Tells Claude Code where to find its configuration (at original path)
 - `-e GIT_CONFIG_GLOBAL=/tmp/.gitconfig`: Points git to the mounted config
@@ -228,8 +228,8 @@ This default behavior ensures that session histories and project paths are compa
 ### Anonymized Paths (Old Behavior with --anonymized-paths)
 
 When using `--anonymized-paths`, paths are mapped to generic container locations:
-- `-v ~/.claude:/claude:Z`: Mounts to `/claude` in container
-- `-v "$(pwd):/workspace:Z"`: Mounts to `/workspace` in container
+- `-v ~/.claude:/claude:z`: Mounts to `/claude` in container
+- `-v "$(pwd):/workspace:z"`: Mounts to `/workspace` in container
 - `-w /workspace`: Working directory is `/workspace`
 - `-e CLAUDE_CONFIG_DIR=/claude`: Config directory is `/claude`
 
