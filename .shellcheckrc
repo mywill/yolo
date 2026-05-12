@@ -1,0 +1,10 @@
+# SC1090: dynamic `source "$config_file"` is intentional (user config path).
+disable=SC1090
+# SC2155: `local x=$(cmd)` style is fine here; the commands (pwd, cat) cannot fail.
+disable=SC2155
+# SC2064: trap "rm -rf '$build_dir'" expands at trap-set time, which is what we want
+# (build_dir is the mktemp output and is never reassigned).
+disable=SC2064
+# SC2054: `--userns=keep-id:uid=1000,gid=1000` is a single podman argument string;
+# the comma is part of podman's syntax, not an array element separator.
+disable=SC2054

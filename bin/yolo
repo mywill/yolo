@@ -256,9 +256,6 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-# Save original PODMAN_ARGS for later (before we potentially move them to CLAUDE_ARGS)
-CLI_PODMAN_ARGS=("${PODMAN_ARGS[@]}")
-
 if [ "$found_separator" = 0 ]; then
     # so we did not find any -- everything is actually CLAUDE_ARGS
     CLAUDE_ARGS=("${PODMAN_ARGS[@]}")
@@ -330,15 +327,25 @@ fi
 
 BASE_IMAGE="con-bomination-claude-code"
 
+# Portable SHA-256: prefer GNU sha256sum, fall back to BSD shasum (macOS).
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256_cmd() { sha256sum; }
+else
+    sha256_cmd() { shasum -a 256; }
+fi
+
 # Returns 0 if podman supports the --userns=keep-id:uid=N,gid=N remap syntax (>= 4.3.0).
 podman_supports_keep_id_remap() {
-    local ver
+    local ver major minor
     ver=$(podman version --format '{{.Client.Version}}' 2>/dev/null) || return 1
     # Strip any pre-release/build suffix (e.g. "4.9.4-rhel" -> "4.9.4")
     ver="${ver%%-*}"
     [ -z "$ver" ] && return 1
-    # Lexicographic compare via sort -V: lowest of {ver, 4.3.0} should be 4.3.0 if ver >= 4.3.0
-    [ "$(printf '%s\n4.3.0\n' "$ver" | sort -V | head -n1)" = "4.3.0" ]
+    IFS=. read -r major minor _ <<<"$ver"
+    [ -z "$major" ] && return 1
+    if [ "$major" -gt 4 ]; then return 0; fi
+    if [ "$major" -eq 4 ] && [ "${minor:-0}" -ge 3 ]; then return 0; fi
+    return 1
 }
 
 # Resolve the container image to use, building a derived image if .yolo/ scripts exist
@@ -374,7 +381,7 @@ resolve_image() {
     [ "$has_root_setup" -eq 1 ] && hash_input+=$(cat "$yolo_dir/root-setup.sh")
     [ "$has_user_setup" -eq 1 ] && hash_input+=$(cat "$yolo_dir/user-setup.sh")
     local hash
-    hash=$(echo -n "$hash_input" | sha256sum | cut -c1-12)
+    hash=$(echo -n "$hash_input" | sha256_cmd | cut -c1-12)
     local derived_image="yolo-${hash}"
 
     # Check cache (skip if --rebuild)
