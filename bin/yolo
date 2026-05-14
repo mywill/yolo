@@ -374,14 +374,17 @@ resolve_image() {
         exit 1
     fi
 
-    # Compute hash from base image ID + script contents
+    # Compute hash from base image ID + script contents.
+    # The |root|/|user| delimiters are required: root-setup.sh and user-setup.sh
+    # run in different Dockerfile stages (as root vs the claude user), so identical
+    # content in different files must produce different hashes.
     local base_id
     base_id=$(podman image inspect "$BASE_IMAGE" --format '{{.Id}}' 2>/dev/null)
     local hash_input="$base_id"
-    [ "$has_root_setup" -eq 1 ] && hash_input+=$(cat "$yolo_dir/root-setup.sh")
-    [ "$has_user_setup" -eq 1 ] && hash_input+=$(cat "$yolo_dir/user-setup.sh")
+    [ "$has_root_setup" -eq 1 ] && hash_input+="|root|$(cat "$yolo_dir/root-setup.sh")"
+    [ "$has_user_setup" -eq 1 ] && hash_input+="|user|$(cat "$yolo_dir/user-setup.sh")"
     local hash
-    hash=$(echo -n "$hash_input" | sha256_cmd | cut -c1-12)
+    hash=$(printf '%s' "$hash_input" | sha256_cmd | cut -c1-12)
     local derived_image="yolo-${hash}"
 
     # Check cache (skip if --rebuild)

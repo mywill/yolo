@@ -358,19 +358,18 @@ EOF
     podman_log_has_arg "$tag"
 }
 
-@test "resolve_image: user-setup.sh content yields a different hash from root-setup.sh content" {
-    # Note: the script's hash input concatenates script contents WITHOUT a
-    # per-file delimiter, so identical content in different files would
-    # collide. Realistic usage has distinct content; this test asserts that
-    # case behaves as expected.
+@test "resolve_image: only user-setup.sh -> different hash than root-only with same content" {
+    # Locks in the per-file delimiter behavior: identical content in
+    # root-setup.sh vs user-setup.sh must produce different hashes, because
+    # the two run in different Dockerfile stages (root vs claude user).
     mkdir -p .yolo
-    echo "echo root-side" >.yolo/root-setup.sh
+    echo "echo shared" >.yolo/root-setup.sh
     run_yolo
     assert_success
     root_only_tag="$(first_built_tag)"
 
     rm -f .yolo/root-setup.sh
-    echo "echo user-side" >.yolo/user-setup.sh
+    echo "echo shared" >.yolo/user-setup.sh
     : >"$MOCK_PODMAN_LOG"
     : >"$MOCK_PODMAN_BUILT_TAGS"
     export MOCK_PODMAN_EXISTING_IMAGES="con-bomination-claude-code"
