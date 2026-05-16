@@ -28,7 +28,9 @@ OPTIONS:
 
     Project-specific dependencies (Rust, Node, Python, etc.) are configured
     via .yolo/ setup scripts in your project directory, not in this base image.
-    See images/examples/ for templates and 'yolo --help' for details.
+    Templates live at images/examples/ (and are bundled with the skill at
+    ~/.claude/skills/yolo/recipes/ when the skill is installed).
+    See 'yolo --help' for details.
 
 EXAMPLES:
     # Interactive setup (default)
@@ -175,6 +177,51 @@ elif [ "$INSTALL_MODE" = "auto" ]; then
             echo "✓ yolo script already exists and is up to date at $YOLO_SCRIPT"
         fi
     fi
+fi
+
+# Install yolo agent skill to ~/.claude/skills/yolo
+# This helps Claude Code agents work with yolo more effectively
+# (install yolo, add .yolo/ to a project, edit .git/yolo/config, troubleshoot).
+SHOULD_INSTALL_SKILL=false
+SKILL_SOURCE_DIR="$SCRIPT_DIR/skills/yolo"
+SKILLS_DEST_DIR="$HOME/.claude/skills"
+SKILL_DEST_DIR="$SKILLS_DEST_DIR/yolo"
+
+if [ -d "$SKILL_SOURCE_DIR" ]; then
+    if [ "$INSTALL_MODE" = "no" ]; then
+        echo "Skipping yolo skill installation (--install=no specified)"
+    elif [ "$INSTALL_MODE" = "yes" ]; then
+        SHOULD_INSTALL_SKILL=true
+        echo "Installing yolo skill (--install=yes specified)"
+    elif [ "$INSTALL_MODE" = "auto" ]; then
+        echo
+        echo "Would you like to install the yolo agent skill?"
+        echo
+        echo "This helps Claude Code agents work with yolo more effectively:"
+        echo "  - install yolo / add .yolo/ to a project / edit .git/yolo/config"
+        echo "  - diagnose failures (missing image, git push over SSH, GPU, etc.)"
+        echo
+        echo "It will be installed to $SKILL_DEST_DIR/"
+        echo
+        read -p "Install yolo skill? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            SHOULD_INSTALL_SKILL=true
+        fi
+    fi
+fi
+
+if [ "$SHOULD_INSTALL_SKILL" = true ]; then
+    mkdir -p "$SKILLS_DEST_DIR"
+    rm -rf "$SKILL_DEST_DIR"
+    cp -r "$SKILL_SOURCE_DIR" "$SKILL_DEST_DIR"
+    # Bundle .yolo/ recipe templates with the skill so agents can read them
+    # without needing the yolo repo on disk. Canonical source: images/examples/.
+    if [ -d "$SCRIPT_DIR/images/examples" ]; then
+        cp -r "$SCRIPT_DIR/images/examples" "$SKILL_DEST_DIR/recipes"
+    fi
+    echo "✓ Installed skill: yolo -> $SKILL_DEST_DIR"
+    echo
 fi
 
 if [ "$SHOULD_INSTALL" = false ]; then

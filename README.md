@@ -105,6 +105,19 @@ Command line options always override configuration file settings. Use `--no-conf
 
 See `config.example` for a complete configuration template with detailed comments.
 
+### Agent Skill
+
+The repo ships with a Claude Code skill (`skills/yolo/`) that helps agents work with yolo — installing it, adding `.yolo/` to a project, editing `.git/yolo/config`, and troubleshooting failures.
+
+`setup-yolo.sh` prompts to install it into `~/.claude/skills/yolo/` during setup. To install (or reinstall) manually:
+
+```bash
+mkdir -p ~/.claude/skills
+cp -r skills/yolo ~/.claude/skills/
+```
+
+Once installed, an agent will pick it up automatically when you ask things like "help me add yolo to this project" or "yolo says base image not found".
+
 > **TODO**: Add curl-based one-liner setup once this PR is merged
 
 ## First-Time Login
