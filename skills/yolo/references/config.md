@@ -14,10 +14,11 @@ All optional. Bash file → any bash syntax works.
 
 | Variable | Type | Default | Effect |
 |---|---|---|---|
+| `HARNESS` | string | `claude` | Active harness: `claude` or `opencode`. (`codex` is parsed but currently exits with "planned but not yet enabled"; see `SPEC.md` §10.) Overridden by `--harness=`. |
 | `YOLO_PODMAN_VOLUMES` | array | `()` | Extra mounts (each through `expand_volume`). |
 | `YOLO_PODMAN_OPTIONS` | array | `()` | Args prepended to `podman run`. |
-| `YOLO_CLAUDE_ARGS` | array | `()` | Args prepended to claude (after `--dangerously-skip-permissions`). |
-| `USE_ANONYMIZED_PATHS` | 0/1 | 0 | Mount `$HOME/.claude`→`/claude` and `$(pwd)`→`/workspace`. |
+| `YOLO_HARNESS_ARGS` | array | `()` | Args prepended to the active harness (after its yolo-mode flag). |
+| `YOLO_CLAUDE_ARGS` | array | `()` | **Deprecated.** If set, merged into `YOLO_HARNESS_ARGS` with a stderr warning on each invocation. `YOLO_HARNESS_ARGS` wins on conflicts. |
 | `USE_NVIDIA` | 0/1 | 0 | Enable `--nvidia`. |
 | `WORKTREE_MODE` | `ask`/`bind`/`skip`/`error` | `ask` | Default for `--worktree=`. |
 
@@ -32,21 +33,21 @@ Precedence (highest wins): CLI args after `--` → CLI args before `--` → conf
 | `"/host:/container"` | `/host:/container:z` |
 | `"/host:/container:ro,z"` | unchanged |
 
-`~` → `$HOME`. `:z` added when no options. `::ro` = read-only same-path.
+`~` → `$HOME`. Yolo auto-appends `,z` (SELinux shared relabel) to the bare-path and `::opt` shorthand forms unless `z` or `Z` is already in the opts list — required for read access on SELinux-enforcing hosts (Fedora/RHEL).
 
 Use `+=` (not `=`) when appending; `=` resets the array.
 
 ## Common patterns
 
 ```bash
+# Pin the harness for this project
+HARNESS="opencode"
+
 # Add a mount
 YOLO_PODMAN_VOLUMES+=("~/datasets::ro")
 
-# Switch model (CLI claude args after `--` override this)
-YOLO_CLAUDE_ARGS=("--model=claude-opus-4-7")
-
-# Anonymized paths — share `claude --continue` context across repos
-USE_ANONYMIZED_PATHS=1
+# Switch model (CLI args after `--` override this)
+YOLO_HARNESS_ARGS=("--model=claude-opus-4-7")
 
 # GPU
 USE_NVIDIA=1
@@ -68,12 +69,11 @@ YOLO_PODMAN_OPTIONS+=("--memory=16g" "--cpus=4")
 YOLO_PODMAN_OPTIONS+=("--network=host")
 ```
 
-### Skip the on-start `claude update`
-
-Per-run: `yolo --entrypoint=claude` (cleanest — bypasses `entrypoint.sh` and tini).
-
-Permanent in config (also bypasses tini PID 1, so unmanaged children may leak):
-
-```bash
-YOLO_PODMAN_OPTIONS+=("--entrypoint=/usr/bin/claude")
-```
+> On container start, the entrypoint runs a per-harness self-update (claude
+> `claude update`; opencode `curl ... | bash`) with a 120s timeout. Ctrl-C
+> aborts it cleanly. To skip entirely: `yolo --entrypoint=<harness>`
+> bypasses `entrypoint.sh`. To pin harness versions deterministically,
+> build the image with `--build-arg CLAUDE_CODE_VERSION=…` or
+> `OPENCODE_VERSION=…`. (`CODEX_VERSION=…` is still accepted as a
+> build-arg but currently has no effect since the codex install is
+> commented out — see `SPEC.md` §10.)

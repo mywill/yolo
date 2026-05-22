@@ -40,5 +40,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y podman
       - name: Build base image
         run: ./setup-yolo.sh --install=no
-      - name: Smoke-test container
-        run: podman run --rm con-bomination-claude-code claude --help
+      - name: Smoke-test container (claude)
+        run: podman run --rm yolo-base claude --help
+      - name: Smoke-test container (opencode)
+        run: podman run --rm yolo-base opencode --help
+      # codex smoke-test deferred — re-add once codex is re-enabled in the Dockerfile
+      # - name: Smoke-test container (codex)
+      #   run: podman run --rm yolo-base codex --help

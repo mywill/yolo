@@ -4,6 +4,7 @@
 PROJECT_ROOT="$(cd "$(dirname "${BATS_TEST_FILENAME}")/.." && pwd)"
 export PROJECT_ROOT
 export YOLO_BIN="${PROJECT_ROOT}/bin/yolo"
+export SETUP_YOLO_BIN="${PROJECT_ROOT}/setup-yolo.sh"
 
 load "${PROJECT_ROOT}/tests/test_helper/bats-support/load"
 load "${PROJECT_ROOT}/tests/test_helper/bats-assert/load"
@@ -29,11 +30,14 @@ setup_yolo_test() {
     : >"$MOCK_PODMAN_LOG"
     : >"$MOCK_PODMAN_BUILT_TAGS"
 
-    export MOCK_PODMAN_EXISTING_IMAGES="con-bomination-claude-code"
+    export MOCK_PODMAN_EXISTING_IMAGES="yolo-base"
     export MOCK_PODMAN_IMAGE_ID="sha256:deadbeef00000000000000000000000000000000000000000000000000000000"
     export MOCK_PODMAN_VERSION="4.9.4"
 
-    unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
+    unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS \
+          OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY \
+          GROQ_API_KEY GEMINI_API_KEY OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS \
+          HARNESS YOLO_NO_AMBIGUOUS_WARN
 }
 
 # Run bin/yolo via bats `run` so $status/$output/$lines are populated.

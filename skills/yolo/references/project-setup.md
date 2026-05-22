@@ -5,7 +5,7 @@
 ```
 your-project/.yolo/
 ├── root-setup.sh    # runs as root during build (apt-get, /etc/, users)
-└── user-setup.sh    # runs as 'claude' user (rustup, uv, nvm, cargo install, npm -g)
+└── user-setup.sh    # runs as 'agent' user (rustup, uv, nvm, cargo install, npm -g)
 ```
 
 `root-setup.sh` is deleted from the image after running; `user-setup.sh` is kept (so installs are inspectable later).

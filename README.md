@@ -1,10 +1,12 @@
-# Running Claude Code in a Container
+# yolo — containerized AI coding harnesses
 
-This guide shows how to run claude-code in a Podman container while preserving your configuration and working directory access.
+Run **claude** or **opencode** inside a podman container with permission prompts skipped. One launcher, one image (`yolo-base`), interchangeable harnesses. (**codex** is planned but not yet enabled in this build — see "Planned" below.)
 
-## Easy Setup (Recommended)
+The container is the isolation boundary, not the harness. The harness's "skip all permission prompts" flag is injected automatically.
 
-Clone the repository and run the setup script to build the container and optionally create a `YOLO` command:
+## Install
+
+Requires podman ≥ 4.3 (ownership round-trips cleanly for any host UID). On podman < 4.3 yolo falls back to `--user=` form; clean ownership only when host UID is 1000.
 
 ```bash
 git clone https://github.com/con/yolo
@@ -12,280 +14,220 @@ cd yolo
 ./setup-yolo.sh
 ```
 
-This will:
-1. Build the container image if it doesn't exist
-2. Optionally create a `YOLO` shell function
-3. Configure everything for you
+`setup-yolo.sh` builds `yolo-base` (claude + opencode pre-installed; codex deferred), installs `yolo` to `~/.local/bin`, and installs the yolo skill to `~/.claude/skills/yolo/` and `~/.agents/skills/yolo/`. Ensure `~/.local/bin` is on `$PATH`.
 
-After setup, just run `yolo` from any directory to start Claude Code in YOLO mode!
+Flags: `--build=auto|yes|no`, `--install=auto|yes|no`. Idempotent.
 
-By default, `yolo` preserves your original host paths to ensure session compatibility with native Claude Code. This means:
-- Your `~/.claude` directory is mounted at its original path
-- Your current directory is mounted at its original path (not `/workspace`)
-- Sessions created in the container can be resumed in your native environment and vice versa
+## Harnesses
 
-If you prefer the old behavior with anonymized paths (`/claude` and `/workspace`), use the `--anonymized-paths` flag:
-```bash
-yolo --anonymized-paths
+| Harness    | Yolo-mode signal                                             | Host config dir(s)                              | Default auth env vars forwarded                                                               |
+| ---------- | ------------------------------------------------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `claude`   | CLI flag `--dangerously-skip-permissions`                    | `~/.claude`                                     | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`                             |
+| `opencode` | env `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true` (force-set) | `~/.config/opencode`, `~/.local/share/opencode` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
+
+"Forwarded" means `-e VAR` with no value — podman picks up the host value. Export the keys on your host; they appear inside the container.
+
+### opencode: terminal copy/paste
+
+opencode's TUI captures mouse events by default, which blocks native terminal text selection and copy. `setup-yolo.sh` checks `~/.config/opencode/tui.json` on each interactive run and reports status with colored output:
+
+- **Missing file** → offers to create one with `"mouse": false` (interactive prompt).
+- **File present with `"mouse": false`** → green `✓` confirmation.
+- **File present without `"mouse": false`** → yellow `⚠` warning showing the exact line to add.
+
+To configure manually:
+
+```json
+{
+  "$schema": "https://opencode.ai/tui.json",
+  "mouse": false
+}
 ```
 
-### Git Worktree Support
+Colors honour `NO_COLOR=1` and auto-disable when stdout isn't a TTY (e.g. piping setup output to a file).
 
-When running in a git worktree, `yolo` can detect and optionally bind mount the original repository. This allows Claude to access git objects and perform operations like commit and fetch. Control this behavior with the `--worktree` option:
+### Planned: codex
 
-- `--worktree=ask` (default): Prompts whether to bind mount the original repo
-- `--worktree=bind`: Automatically bind mounts the original repo
-- `--worktree=skip`: Skip bind mounting and continue normally
-- `--worktree=error`: Exit with error if running in a worktree
+The codex (OpenAI Codex CLI) harness is plumbed end-to-end but deferred in this build. `yolo --harness=codex` exits with a "planned but not yet enabled" message. The hold-up: codex is npm-distributed and required `npm config set prefix` in `~/.npmrc`, which collides with `nvm` in `.yolo/user-setup.sh`. Re-enabling means uncommenting one block in `images/Dockerfile`, one branch in `bin/yolo`'s `select_harness()`, and one case in `images/entrypoint.sh` — all flagged in-file.
 
-```bash
-# Prompt for bind mount decision (default)
-yolo
-
-# Always bind mount in worktrees
-yolo --worktree=bind
-
-# Skip bind mounting, continue normally
-yolo --worktree=skip
-
-# Disallow running in worktrees
-yolo --worktree=error
-```
-
-**Security note**: Bind mounting the original repo exposes more files and allows modifications. The prompt helps prevent unintended access.
-
-### Project Configuration
-
-You can create a per-project configuration file to avoid repeating command line options. The config is auto-created on first run, or you can use `yolo --install-config`:
+## Usage
 
 ```bash
-# Auto-creates .git/yolo/config on first run in a git repo
-yolo
-
-# Or manually install/view config
-yolo --install-config
-
-# Edit with your preferences
-vi .git/yolo/config
+yolo                          # claude (default harness)
+yolo --harness=opencode
+# yolo --harness=codex        # planned, not yet enabled
+yolo --rebuild                # force rebuild of the project's derived image
+yolo --nvidia                 # GPU passthrough via CDI
+yolo -- "help with this code" # pass args to the harness
 ```
 
-The configuration file is stored in `.git/yolo/` which means:
-- It won't be tracked by git
-- It won't be destroyed by `git clean`
-- It works correctly with git worktrees (they all reference the same `.git` directory)
-
-**Example configuration** (`.git/yolo/config`):
-```bash
-# Volume mounts with shorthand syntax
-YOLO_PODMAN_VOLUMES=(
-    "~/projects"        # Mounts ~/projects at same path in container
-    "~/data::ro"        # Mounts ~/data read-only at same path
-)
-
-# Additional podman options
-YOLO_PODMAN_OPTIONS=(
-    "--env=DEBUG=1"
-)
-
-# Arguments for claude
-YOLO_CLAUDE_ARGS=(
-    "--model=claude-3-opus-20240229"
-)
-
-# Default flags
-USE_NVIDIA=1
-```
-
-**Volume shorthand syntax:**
-- `"~/projects"` → `~/projects:~/projects:z` (1-to-1 mount)
-- `"~/data::ro"` → `~/data:~/data:ro,z` (1-to-1 with options)
-- `"~/data:/data:z"` → `~/data:/data:z` (explicit, unchanged)
-
-Command line options always override configuration file settings. Use `--no-config` to ignore the configuration file entirely.
-
-See `config.example` for a complete configuration template with detailed comments.
-
-### Agent Skill
-
-The repo ships with a Claude Code skill (`skills/yolo/`) that helps agents work with yolo — installing it, adding `.yolo/` to a project, editing `.git/yolo/config`, and troubleshooting failures.
-
-`setup-yolo.sh` prompts to install it into `~/.claude/skills/yolo/` during setup. To install (or reinstall) manually:
+Pin a per-project default in `.git/yolo/config`:
 
 ```bash
-mkdir -p ~/.claude/skills
-cp -r skills/yolo ~/.claude/skills/
+HARNESS="opencode"
 ```
 
-Once installed, an agent will pick it up automatically when you ask things like "help me add yolo to this project" or "yolo says base image not found".
+Precedence (highest wins): `--harness=` flag → `HARNESS=` in config → `HARNESS` env var → default `claude`.
 
-> **TODO**: Add curl-based one-liner setup once this PR is merged
+Harness config dirs land at fixed `/home/agent/...` paths inside the container (the container user is `agent`, UID 1000) regardless of your host `$HOME`. The workspace mount preserves your host path on both sides so session resume (`claude --continue` and the opencode equivalent) interops between containerized and native runs.
 
-## First-Time Login
+## Mixing podman flags and harness args
 
-On your first run, you'll need to authenticate:
-
-1. Claude Code will display a URL like `https://claude.ai/oauth/authorize?...`
-2. Copy the URL and paste it into a browser on your host machine
-3. Complete the authentication in your browser
-4. Copy the code from the browser and paste it back into the container terminal
-
-Your credentials are stored in `~/.claude` on your host, so you only need to login once. Subsequent runs will use the stored credentials automatically.
-
-## Manual Setup
-
-If you prefer to run commands manually, first build the image from the `images/` directory:
+Tokens before `--` that aren't recognized yolo flags go to `podman run`. Tokens after `--` go to the harness. **If no `--` is present, everything unrecognized goes to the harness.**
 
 ```bash
-podman build --build-arg TZ=$(timedatectl show --property=Timezone --value) -t con-bomination-claude-code images/
+yolo -v /data:/data -- --model=opus    # podman flag + harness flag (correct)
+yolo -- --resume                       # harness-only
+yolo -v /data:/data                    # ⚠ no -- → -v leaks to harness; yolo warns
 ```
 
-Then run (with original host paths preserved by default):
+yolo prints a stderr warning when it sees a common podman flag (`-v`, `-p`, `-e`, `--volume`, `--publish`, `--env`, `--network`, `--memory`, `--cpus`, `--shm-size`, `--device`) before the implicit boundary. Silence it with `YOLO_NO_AMBIGUOUS_WARN=1`.
 
-```bash
-podman run -it --rm \
-  --userns=keep-id:uid=1000,gid=1000 \
-  -v "$HOME/.claude:$HOME/.claude:z" \
-  -v ~/.gitconfig:/tmp/.gitconfig:ro,z \
-  -v "$(pwd):$(pwd):z" \
-  -w "$(pwd)" \
-  -e CLAUDE_CONFIG_DIR="$HOME/.claude" \
-  -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \
-  con-bomination-claude-code \
-  claude --dangerously-skip-permissions
-```
+## Skills
 
-Or with anonymized paths (old behavior):
+The [SKILL.md format](https://agentskills.io) is an open standard adopted by claude, opencode, codex, and others. Yolo's bundled skill (`skills/yolo/`) helps agents reason about yolo itself.
 
-```bash
-podman run -it --rm \
-  --userns=keep-id:uid=1000,gid=1000 \
-  -v ~/.claude:/claude:z \
-  -v ~/.gitconfig:/tmp/.gitconfig:ro,z \
-  -v "$(pwd):/workspace:z" \
-  -w /workspace \
-  -e CLAUDE_CONFIG_DIR=/claude \
-  -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \
-  con-bomination-claude-code \
-  claude --dangerously-skip-permissions
-```
+Skill discovery (the path the harness reads inside the container):
 
-> **Note**: `--userns=keep-id:uid=1000,gid=1000` requires podman ≥ 4.3 (Nov 2022). On older podman (e.g. Ubuntu 22.04 ships 3.4), substitute `--user="$(id -u):$(id -g)" --userns=keep-id` — file ownership only round-trips correctly when your host UID is 1000. The `yolo` script handles this fallback automatically.
+| Harness  | User-level                                                                                           | Project-level                                             |
+| -------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| claude   | `/home/agent/.claude/skills/<name>/SKILL.md`                                                         | `.claude/skills/<name>/SKILL.md` (walks up)               |
+| opencode | `/home/agent/.config/opencode/skills/`, `/home/agent/.claude/skills/`, `/home/agent/.agents/skills/` | `.opencode/skills/`, `.claude/skills/`, `.agents/skills/` |
 
-⚠️ **Note**: This uses `--dangerously-skip-permissions` to bypass all permission prompts. This is safe in containerized environments where the container provides isolation from your host system.
+On the host, `setup-yolo.sh` installs the yolo skill to **both** `~/.claude/skills/yolo/` and `~/.agents/skills/yolo/`. The launcher binds the host's `~/.claude/skills` and `~/.agents/skills` into the opencode container (read-only) at the matching `/home/agent/...` targets. Claude already has `~/.claude` fully mounted (rw) at `/home/agent/.claude`; no extra mount is added there. (Both bind mounts are kept in place so re-enabling codex picks up the same skill paths.)
 
-## What's Included
+## Per-project setup (`.yolo/`)
 
-The base image is intentionally minimal — it includes Claude Code CLI, core shell utilities (git, vim, zsh, jq, fzf, etc.), and git-delta. Language runtimes (Rust, Node, Python) and project-specific system libraries are **not** included in the base image. Instead, use `.yolo/` setup scripts to add exactly what each project needs (see below).
-
-See the [Dockerfile](images/Dockerfile) for the complete list of base packages.
-
-## Per-Project Setup
-
-Place setup scripts in a `.yolo/` directory at the root of your project to customize the container image with project-specific dependencies:
+A `.yolo/` directory at the project root customizes the derived image with project-specific dependencies:
 
 ```
 your-project/
   .yolo/
-    root-setup.sh   # Runs as root during image build (apt-get install, etc.)
-    user-setup.sh   # Runs as claude user during image build (rustup, nvm, uv, etc.)
+    root-setup.sh   # runs as root during image build (apt-get, etc.)
+    user-setup.sh   # runs as 'agent' user (rustup, nvm, uv, etc.)
 ```
 
-Either script is optional — include only what you need.
+Both files optional. yolo hashes their contents + the base image ID and builds a derived `yolo-<hash12>` image on first use. Cached on subsequent runs; `--rebuild` forces a rebuild.
 
-**How it works:**
-1. `yolo` detects `.yolo/` scripts and hashes their contents + the base image ID
-2. If a derived image with that hash exists, it's used directly (cache hit)
-3. Otherwise, a new image is built from the base with your scripts applied
-4. Use `--rebuild` to force a rebuild if needed
+The `.yolo/` contract is harness-independent — the same derived image is reused across all enabled harnesses (and across codex too, once it's re-enabled).
 
-**Example** — adding Node.js to your project:
+Templates: `images/examples/` (rust, python, node, tauri, full).
+
+## Project config (`.git/yolo/config`)
+
+Sourced as bash on every run. Auto-created on first run in a git repo. Run `yolo --install-config` to view or create manually.
+
+| Variable              | Type   | Default  | Effect                                                                                                                                          |
+| --------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HARNESS`             | string | `claude` | Selects harness (`claude` or `opencode`; codex planned). Overridden by `--harness=`.                                                            |
+| `YOLO_PODMAN_VOLUMES` | array  | `()`     | Extra mounts. Each entry passes through `expand_volume`.                                                                                        |
+| `YOLO_PODMAN_OPTIONS` | array  | `()`     | Prepended to `podman run` args.                                                                                                                 |
+| `YOLO_HARNESS_ARGS`   | array  | `()`     | Prepended to the active harness's args.                                                                                                         |
+| `YOLO_CLAUDE_ARGS`    | array  | `()`     | **Deprecated.** Merged into `YOLO_HARNESS_ARGS` if set, with a stderr warning printed on each invocation. `YOLO_HARNESS_ARGS` wins on conflict. |
+| `USE_NVIDIA`          | 0/1    | 0        | Default for `--nvidia`.                                                                                                                         |
+| `WORKTREE_MODE`       | string | `ask`    | Default for `--worktree=`. `ask`/`bind`/`skip`/`error`.                                                                                         |
+
+Volume shorthand (`expand_volume`):
+
+| Input                   | Expands to                          |
+| ----------------------- | ----------------------------------- |
+| `~/projects`            | `<HOME>/projects:<HOME>/projects:z` |
+| `~/data::ro`            | `<HOME>/data:<HOME>/data:ro,z`      |
+| `/host:/container`      | `/host:/container:z`                |
+| `/host:/container:ro,z` | unchanged                           |
+
+`+=` to append. `=` to reset. CLI flags override config. `--no-config` skips the file.
+
+## NVIDIA GPU
+
+`--nvidia` adds `--device nvidia.com/gpu=all --security-opt label=disable`. Requires nvidia-container-toolkit on the host. Generate a CDI spec once:
+
 ```bash
-mkdir .yolo
-cat > .yolo/user-setup.sh << 'EOF'
-#!/bin/bash
-set -e
-export NVM_DIR="$HOME/.nvm"
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-. "$NVM_DIR/nvm.sh"
-nvm install --lts
-corepack enable
-corepack prepare pnpm@latest --activate
-EOF
-yolo  # builds derived image, then starts claude with node available
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
 ```
 
-See `images/examples/` for ready-to-use templates:
-- **`rust/`** — build-essential, libssl-dev, rustup
-- **`python/`** — uv (Python package manager)
-- **`node/`** — nvm, Node.js LTS, corepack/pnpm
-- **`tauri/`** — WebKit/GTK libs, Rust, Node.js, pnpm
-- **`full/`** — everything (replicates the old monolithic image)
+Missing CDI → warning, no GPU.
 
-## Command Breakdown
+## Git worktrees
 
-### Default Behavior (Preserved Host Paths)
+When `$(pwd)` is a worktree, yolo resolves the original repo from the `gitdir:` pointer. Modes:
 
-- `--userns=keep-id:uid=1000,gid=1000`: Maps your host user to the in-container `claude` user (UID/GID 1000) so files in bind mounts are owned correctly on the host regardless of your host UID (requires podman ≥ 4.3)
-- `-v "$HOME/.claude:$HOME/.claude:z"`: Bind mounts your Claude configuration directory at its original path with shared SELinux relabeling
-- `-v ~/.gitconfig:/tmp/.gitconfig:ro,z`: Mounts git config read-only for commits (push operations not supported)
-- `-v "$(pwd):$(pwd):z"`: Bind mounts your current working directory at its original path
-- `-w "$(pwd)"`: Sets the working directory inside the container to match your host path
-- `-e CLAUDE_CONFIG_DIR="$HOME/.claude"`: Tells Claude Code where to find its configuration (at original path)
-- `-e GIT_CONFIG_GLOBAL=/tmp/.gitconfig`: Points git to the mounted config
-- `claude --dangerously-skip-permissions`: Skips all permission prompts (safe in containers)
-- `--rm`: Automatically removes the container when it exits
-- `-it`: Interactive terminal
+| Mode            | Behavior                                                                   |
+| --------------- | -------------------------------------------------------------------------- |
+| `ask` (default) | Prompt; on `y`, bind-mount the original repo.                              |
+| `bind`          | Always bind-mount the original repo.                                       |
+| `skip`          | Continue without binding. Git ops needing original-repo metadata may fail. |
+| `error`         | Exit non-zero.                                                             |
 
-This default behavior ensures that session histories and project paths are compatible between containerized and native Claude Code environments.
+Bind-mounting exposes more files. Trade off against your need for git fetch/push.
 
-### Anonymized Paths (Old Behavior with --anonymized-paths)
+## Security
 
-When using `--anonymized-paths`, paths are mapped to generic container locations:
-- `-v ~/.claude:/claude:z`: Mounts to `/claude` in container
-- `-v "$(pwd):/workspace:z"`: Mounts to `/workspace` in container
-- `-w /workspace`: Working directory is `/workspace`
-- `-e CLAUDE_CONFIG_DIR=/claude`: Config directory is `/claude`
+Permission prompts are skipped _inside_ the container; the container is the isolation layer.
 
-## Tips
+Accessible by default: active harness's host config dir(s) (rw), `$HOME/.gitconfig` (ro), `$(pwd)` (rw), bound original repo (worktree), any `YOLO_PODMAN_VOLUMES` or CLI `-v`, outbound network.
 
-1. **Persist configuration**: The `~/.claude` bind mount ensures your settings, API keys, and session history persist between container runs
+Not accessible: `~/.ssh`, other credential dirs, host root, inbound network.
 
-2. **Session compatibility**: By default, paths are preserved to match your host environment. This means:
-   - Sessions created in the container can be resumed outside the container using `claude --continue` in your native environment
-   - Each project maintains its own session history based on its actual path (e.g., `/home/user/project`)
-   - You can seamlessly switch between containerized and native Claude Code for the same project
+`git push` over SSH fails by design (no SSH keys mounted). Workaround: commit in container, push from host; mount keys explicitly; or use HTTPS + token in `~/.gitconfig`.
 
-   **Note**: With `--anonymized-paths`, all projects appear to be in `/workspace`, which allows `claude --continue` to retain context across different projects that were also run with this flag. This can be useful for maintaining conversation context when working on related codebases.
+Prompt-injection in untrusted project code can attempt to coerce the harness. The mount surface bounds what it can touch. Mounting extra credentials expands the attack surface.
 
-3. **File ownership**: The `--userns=keep-id:uid=1000,gid=1000` flag maps the in-container `claude` user (UID 1000) back to your host user, so files created inside the container are owned by your host user — regardless of what your host UID is
+## Manual podman invocation
 
-4. **Git operations**: Git config is mounted read-only, so Claude Code can read your identity and make commits. However, **SSH keys are not mounted**, so `git push` operations will fail. You'll need to push from your host after Claude Code commits your changes.
+If you'd rather not install the launcher, the same effect for each harness:
 
-5. **Multiple directories**: Mount additional directories as needed:
-   ```bash
-   yolo -v ~/projects:~/projects -v ~/data:~/data -- "help with this code"
-   ```
-   Or with anonymized paths:
-   ```bash
-   yolo --anonymized-paths -v ~/projects:/projects -v ~/data:/data -- "help with this code"
-   ```
+```bash
+# Claude
+podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \
+  -v "$HOME/.claude:/home/agent/.claude:z" \
+  -v "$HOME/.gitconfig:/tmp/.gitconfig:ro,z" \
+  -v "$(pwd):$(pwd):z" -w "$(pwd)" \
+  -e CLAUDE_CONFIG_DIR=/home/agent/.claude \
+  -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \
+  -e CLAUDE_CODE_OAUTH_TOKEN \
+  -e CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS \
+  -e YOLO_HARNESS=claude \
+  yolo-base \
+  claude --dangerously-skip-permissions
 
-## Security Considerations
+# OpenCode
+podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \
+  -v "$HOME/.config/opencode:/home/agent/.config/opencode:z" \
+  -v "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:z" \
+  -v "$HOME/.claude/skills:/home/agent/.claude/skills:ro,z" \
+  -v "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z" \
+  -v "$HOME/.gitconfig:/tmp/.gitconfig:ro,z" \
+  -v "$(pwd):$(pwd):z" -w "$(pwd)" \
+  -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \
+  -e OPENAI_API_KEY \
+  -e ANTHROPIC_API_KEY \
+  -e OPENROUTER_API_KEY \
+  -e GROQ_API_KEY \
+  -e GEMINI_API_KEY \
+  -e OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true \
+  -e YOLO_HARNESS=opencode \
+  yolo-base \
+  opencode
+```
 
-YOLO mode runs Claude Code with `--dangerously-skip-permissions`, providing unrestricted command execution within the container. The container provides isolation through:
+`--userns=keep-id:uid=1000,gid=1000` needs podman ≥ 4.3. On older podman use `--user="$(id -u):$(id -g)" --userns=keep-id`.
 
-- **Filesystem boundaries**: Only `~/.claude`, `~/.gitconfig`, and your current working directory are accessible to Claude
-- **Process isolation**: Rootless podman user namespace isolation (`--userns=keep-id:uid=1000,gid=1000`)
-- **Limited host access**: SSH keys and other sensitive files are not mounted
+## Upgrading
 
-**What is NOT restricted:**
+The container user was renamed `claude` → `agent` and container mount paths moved under `/home/agent/...`. After pulling, rebuild the base image:
 
-- **Network access**: Claude can make arbitrary network connections from within the container (to package registries, APIs, external services, etc.)
+```bash
+./setup-yolo.sh --build=yes
+```
 
-**When to be cautious:**
+The setup script offers to remove orphaned `yolo-<hash>` derived images built against the previous base. On-disk session data is unchanged — both before and after, the underlying directory on the host is the same `~/.claude/` (etc.); only the container-side mount label moved. `claude --continue` still finds existing sessions because the workspace path is unchanged.
 
-- **Untrusted repositories**: Malicious code comments or documentation could exploit prompt injection to trick Claude into executing harmful commands or exfiltrating data
-- Mounting directories with sensitive data (credentials, private keys, confidential files)
-- Projects that access production systems or databases
+`USE_ANONYMIZED_PATHS` was removed (silently ignored if still set in old configs); the `--anonymized-paths` CLI flag is consumed and a stderr deprecation note is printed. The `YOLO_CLAUDE_ARGS` config variable is deprecated; if set, its contents are merged into `YOLO_HARNESS_ARGS` and a stderr warning is printed on each invocation. Rename in your `.git/yolo/config` to silence it.
 
-**For higher security needs**, consider running untrusted code in a separate container without mounting sensitive directories, or wait for integration with Anthropic's modern sandbox runtime which provides network-level restrictions.
+## Reference
+
+- `SPEC.md` — contract (flags, mounts, env vars, profile fields).
+- `bin/yolo --help` — CLI reference.
+- `skills/yolo/SKILL.md` — bundled skill source.
+- [agentskills.io](https://agentskills.io) — SKILL.md format spec.

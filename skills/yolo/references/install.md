@@ -17,9 +17,10 @@ cd yolo
 
 `setup-yolo.sh`:
 
-1. Builds the base image `con-bomination-claude-code` (a few minutes; cached after).
+1. Builds the prebuilt image `yolo-base` (a few minutes; cached after). The image bundles `claude` and `opencode`. (`codex` is plumbed but its install is commented out — see `SPEC.md` §10.)
 2. Prompts to install `yolo` to `~/.local/bin/yolo`.
-3. Prompts to install the agent skill to `~/.claude/skills/`.
+3. Prompts to install the agent skill to **both** `~/.claude/skills/yolo/` and `~/.agents/skills/yolo/`. The dual install covers both currently-active harnesses' search paths plus codex's (`~/.agents/skills/`) so re-enabling codex later doesn't require a re-install: claude reads `~/.claude/skills/`, opencode reads both. The opencode harness profile also binds both paths read-only into its container, so the skill is discoverable regardless of which active harness launches.
+4. If a legacy `con-bomination-claude-code` tag is detected on the host, offers to remove it after the new image is built.
 
 Ensure `~/.local/bin` is on `$PATH` in `~/.bashrc` / `~/.zshrc`.
 
@@ -39,9 +40,12 @@ Searched at `/etc/cdi/nvidia.yaml` then `/var/run/cdi/nvidia.yaml`. Missing → 
 
 ```bash
 podman build --build-arg TZ=$(timedatectl show --property=Timezone --value) \
-  -t con-bomination-claude-code images/
+  -t yolo-base images/
 cp bin/yolo ~/.local/bin/yolo && chmod +x ~/.local/bin/yolo
-cp -r skills/yolo ~/.claude/skills/   # optional
+# Install skill to both paths so all three harnesses can find it
+mkdir -p ~/.claude/skills ~/.agents/skills
+cp -r skills/yolo ~/.claude/skills/
+cp -r skills/yolo ~/.agents/skills/
 ```
 
 Verify: `yolo --help`.

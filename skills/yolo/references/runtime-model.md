@@ -2,26 +2,26 @@
 
 ## Mount layout
 
-### Default (host paths preserved)
+Host source → container target. Container targets under `/home/agent/...` are fixed regardless of host `$HOME`, so a harness that falls back to `$HOME` inside the container (e.g. opencode reads `$HOME/.config/opencode`) always finds its data — `$HOME=/home/agent` always.
 
-| Host | Container | Mode |
-|---|---|---|
-| `$HOME/.claude` | `$HOME/.claude` | rw |
-| `$HOME/.gitconfig` | `/tmp/.gitconfig` | ro |
-| `$(pwd)` | `$(pwd)` | rw |
-| `<original_repo>` | `<original_repo>` | rw (worktree, when bound) |
+| Host | Container | Mode | Active when |
+|---|---|---|---|
+| `$HOME/.claude` | `/home/agent/.claude` | rw | `HARNESS=claude` |
+| `$HOME/.config/opencode` | `/home/agent/.config/opencode` | rw | `HARNESS=opencode` |
+| `$HOME/.local/share/opencode` | `/home/agent/.local/share/opencode` | rw | `HARNESS=opencode` |
+| `$HOME/.claude/skills` | `/home/agent/.claude/skills` | ro | `HARNESS=opencode` |
+| `$HOME/.agents/skills` | `/home/agent/.agents/skills` | ro | `HARNESS=opencode` |
+| `$HOME/.gitconfig` | `/tmp/.gitconfig` | ro | always |
+| `$(pwd)` | `$(pwd)` | rw | always |
+| `<original_repo>` | `<original_repo>` | rw | worktree, when bound |
 
-`WORKDIR=$(pwd)`. `CLAUDE_CONFIG_DIR=$HOME/.claude`. `$HOME/.claude` is created on host if missing. Preserved paths → sessions interop with native Claude Code (`claude --continue` works both ways).
+(The `$HOME/.codex → /home/agent/.codex` mount and the codex-side ro skill mounts are implemented but disabled — see `SPEC.md` §10.)
 
-### `--anonymized-paths` / `USE_ANONYMIZED_PATHS=1`
+`WORKDIR=$(pwd)`. Each harness's host source dir is created if missing. The ro skill paths are also created if missing, so the bind has something to point at on a fresh machine.
 
-| Host | Container | Mode |
-|---|---|---|
-| `$HOME/.claude` | `/claude` | rw |
-| `$HOME/.gitconfig` | `/tmp/.gitconfig` | ro |
-| `$(pwd)` | `/workspace` | rw |
+The workspace mount preserves the host path on both sides so harness session resume (which keys on the workspace path) interops between containerized and native runs.
 
-`WORKDIR=/workspace`. `CLAUDE_CONFIG_DIR=/claude`. Identical container paths across projects let `claude --continue` carry context between codebases.
+The ro skill mounts make any skill installed at the standard host locations discoverable by opencode. Claude doesn't need separate skill mounts because its full `~/.claude` rw mount already covers `~/.claude/skills/`; claude does not read `~/.agents/skills/`.
 
 ### Worktree binding
 
@@ -33,20 +33,36 @@ When `$(pwd)` is a worktree (`.git` is a file pointing to `<orig>/.git/worktrees
 
 ## Environment variables
 
-Forwarded by the launcher:
+Always forwarded:
 
 | Variable | Behavior |
 |---|---|
-| `CLAUDE_CONFIG_DIR` | Set to in-container claude config path. |
-| `GIT_CONFIG_GLOBAL` | `/tmp/.gitconfig`. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Forwarded by name. |
-| `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | Forwarded by name. |
+| `GIT_CONFIG_GLOBAL` | Set to `/tmp/.gitconfig`. |
+| `YOLO_HARNESS` | Set to the active harness name. Read by `entrypoint.sh` to choose the right self-update branch. |
+
+Per-harness:
+
+| Harness | Config env var (set to container path) | Forwarded by name (`-e NAME`) | Force-set (`-e KEY=VALUE`) |
+|---|---|---|---|
+| `claude` | `CLAUDE_CONFIG_DIR=/home/agent/.claude` | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | (none) |
+| `opencode` | (none — XDG resolves to `/home/agent/.config/opencode`) | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` | `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true` |
+
+(Codex, when re-enabled: `CODEX_HOME=/home/agent/.codex` config var, `OPENAI_API_KEY` forwarded by name. See `SPEC.md` §10.)
+
+"Forwarded by name" = `-e VAR` (no value), so the host's exported value flows through; unset on the host means unset in the container. "Force-set" = `-e VAR=value` always, regardless of host env.
 
 Anything else needs `--env=` via `YOLO_PODMAN_OPTIONS` or CLI `-e`.
 
+## Launcher env vars (control yolo itself)
+
+| Variable | Effect |
+|---|---|
+| `HARNESS` | Initial harness selection. Overridden by config `HARNESS=` and CLI `--harness=`. |
+| `YOLO_NO_AMBIGUOUS_WARN` | Set to `1` to silence the "looks like a podman flag" warning when no `--` separator is present. |
+
 ## User namespace
 
-- Container: `claude`, UID/GID 1000.
+- Container user: `agent`, UID/GID 1000, `HOME=/home/agent`.
 - Host UID → container 1000 via `--userns=keep-id:uid=1000,gid=1000` (podman ≥ 4.3).
 - Podman < 4.3: `--user="$(id -u):$(id -g)" --userns=keep-id` — clean only when host UID is 1000.
 
@@ -64,32 +80,33 @@ Synthesized from `$PWD-$$`:
 2. Non-`[A-Za-z0-9_.-]` → `_`.
 3. Strip leading `.` / `_`.
 
-When the entrypoint is default (`claude`), the same name is also passed as `claude --name=` so podman container and claude session names match (helps `/resume`). User-supplied `--name=` after `--` wins. With `--entrypoint=` set, no `claude --name` is injected.
+Always passed to podman as `--name=$name`. For `HARNESS=claude` only, also passed as `claude --name=` so podman container and claude session names match (helps `/resume`). User-supplied `--name=` after `--` wins. `--entrypoint=` bypasses the profile and injects no `--name`.
 
 ## Fixed podman flags
 
-Always set: `--log-driver=none`, `-it --rm`, `--userns=…`, `--name=<synthesized>`, mounts above, `-w <workspace>`, `-e CLAUDE_CONFIG_DIR=…`, `-e GIT_CONFIG_GLOBAL=/tmp/.gitconfig`, `-e CLAUDE_CODE_OAUTH_TOKEN`, `-e CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`.
+Always set: `--log-driver=none`, `-it --rm`, `--userns=…`, `--name=<synthesized>`, mounts above, `-w <workspace>`, harness env (config-dir env + passthroughs from the table), `-e GIT_CONFIG_GLOBAL=/tmp/.gitconfig`, `-e YOLO_HARNESS=<harness>`.
 
-User flags layer on via `YOLO_PODMAN_OPTIONS`, `YOLO_PODMAN_VOLUMES`, CLI tokens before `--`, claude tokens after `--`.
+User flags layer on via `YOLO_PODMAN_OPTIONS`, `YOLO_PODMAN_VOLUMES`, CLI tokens before `--`, harness tokens after `--`.
 
 ## Entrypoint
 
-`images/entrypoint.sh`:
+`images/entrypoint.sh` runs under tini (PID 1) and, on container start, attempts a per-harness self-update before `exec`-ing the harness command:
 
-```bash
-timeout --foreground 120 claude update </dev/null
-```
+| `YOLO_HARNESS` | Update command |
+|---|---|
+| `claude` | `claude update` |
+| `opencode` | `curl -fsSL https://opencode.ai/install \| bash` |
 
-`INT` trap prints "Update skipped." so Ctrl-C continues to claude. Failures swallowed (`|| true`). PID 1 is `tini`, which reaps zombies.
+(The `codex` branch — `npm install -g --prefix /home/agent/.npm-global @openai/codex@latest` — is commented out alongside the codex install in the Dockerfile. See `SPEC.md` §10.)
 
-Bypass: `yolo --entrypoint=claude` (no update, no tini).
+Each is wrapped in `timeout --foreground 120` with an `INT` trap that prints "Update skipped." and continues — Ctrl-C aborts cleanly. Failures are swallowed (`|| true`). To bypass entirely: `yolo --entrypoint=<harness>` replaces the container command and skips `entrypoint.sh`.
 
 ## Security boundaries
 
-`--dangerously-skip-permissions` runs inside the container — the container is the isolation layer.
+The harness's yolo-mode signal runs inside the container — the container is the isolation layer. The signal is `--dangerously-skip-permissions` (CLI flag) for claude, and `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true` (force-set env var) for opencode. (Codex, when re-enabled, uses CLI flag `--dangerously-bypass-approvals-and-sandbox`.)
 
-Accessible: `$HOME/.claude` rw, `$HOME/.gitconfig` ro, `$(pwd)` rw, bound original repo (worktree), anything in `YOLO_PODMAN_VOLUMES`/`-v`, outbound network.
+Accessible: active harness's host config dir(s) rw, `$HOME/.gitconfig` ro, `$(pwd)` rw, bound original repo (worktree), anything in `YOLO_PODMAN_VOLUMES`/`-v`, outbound network.
 
 Not accessible: `~/.ssh`, other credential dirs, host root, inbound network.
 
-Threat model: prompt-injection in project code can attempt to coerce claude. Mount surface bounds what it can touch. Adding `~/.ssh` or other creds expands attack surface. No outbound firewall.
+Threat model: prompt-injection in project code can attempt to coerce the harness. Mount surface bounds what it can touch. Adding `~/.ssh` or other creds expands attack surface. No outbound firewall.

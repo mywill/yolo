@@ -1,21 +1,24 @@
 #!/bin/bash
-# Claude Code YOLO mode - auto-approve all actions in containerized environment
+# yolo - auto-approve all actions of an AI coding harness in a container
 
 set -e
 
 show_help() {
     cat << 'EOF'
-Usage: yolo [OPTIONS] [-- CLAUDE_ARGS...]
+Usage: yolo [OPTIONS] [-- HARNESS_ARGS...]
 
-Run Claude Code in YOLO mode (auto-approve all actions) inside a container.
+Run an AI coding harness (claude or opencode; codex planned) in YOLO mode
+(auto-approve all actions) inside a container.
 
 OPTIONS:
     -h, --help           Show this help message
-    --anonymized-paths   Use anonymized paths (/claude, /workspace) instead of
-                         preserving host paths
-    --entrypoint=CMD     Override the container entrypoint (default: claude)
+    --harness=NAME       Which harness to run: claude (default) or opencode.
+                         (codex is planned but not yet enabled.)
+                         Also accepts --harness NAME.
+    --entrypoint=CMD     Override the container entrypoint, bypassing the harness
+                         profile. Also accepts --entrypoint CMD.
     --worktree=MODE      Git worktree handling: ask, bind, skip, error
-                         (default: ask)
+                         (default: ask). Also accepts --worktree MODE.
     --nvidia             Enable NVIDIA GPU passthrough via CDI
                          Requires nvidia-container-toolkit on host
     --rebuild            Force rebuild of the project's derived container image
@@ -26,19 +29,20 @@ OPTIONS:
     Additional podman options can be passed before --
 
 EXAMPLES:
-    yolo                              # Basic usage
+    yolo                              # Run claude (default harness)
+    yolo --harness=opencode           # Run opencode
     yolo --nvidia                     # With GPU support
     yolo --rebuild                    # Force rebuild project image
     yolo -v /data:/data               # Extra mount
-    yolo -- "help with this code"     # Pass args to claude
-    yolo --nvidia -- --resume         # GPU + claude args
+    yolo -- "help with this code"     # Pass args to the harness
+    yolo --harness=opencode -- --model=…  # Pass args to a non-default harness
 
 PER-PROJECT SETUP (.yolo/):
     Place setup scripts in a .yolo/ directory at the project root to
     customize the container image with project-specific dependencies.
 
     .yolo/root-setup.sh  - Runs as root during image build (apt-get, etc.)
-    .yolo/user-setup.sh  - Runs as claude user during image build (rustup, nvm, etc.)
+    .yolo/user-setup.sh  - Runs as agent user during image build (rustup, nvm, etc.)
 
     The derived image is cached based on a hash of the script contents and
     the base image ID. It is automatically rebuilt when scripts change.
@@ -58,10 +62,12 @@ PROJECT CONFIGURATION:
     Run 'yolo --install-config' to create a template.
 
     The config file is a bash script that can set:
+    - HARNESS: claude or opencode (overridden by --harness=). codex is planned.
     - YOLO_PODMAN_VOLUMES: array of volume mounts
     - YOLO_PODMAN_OPTIONS: array of podman options
-    - YOLO_CLAUDE_ARGS: array of arguments for claude
-    - USE_ANONYMIZED_PATHS: 0 or 1
+    - YOLO_HARNESS_ARGS: array of arguments for the active harness
+    - YOLO_CLAUDE_ARGS: deprecated alias for YOLO_HARNESS_ARGS; if set, its
+                       contents are merged in and a warning is printed
     - USE_NVIDIA: 0 or 1
     - WORKTREE_MODE: ask, bind, skip, or error
 
@@ -75,6 +81,11 @@ print_config_template() {
 # YOLO Project Configuration
 # This file is sourced as a bash script by yolo
 # Location: .git/yolo/config
+
+# Which harness to run. One of: claude (default), opencode.
+# (codex is planned but not yet enabled in this build of yolo.)
+# Overridden by `yolo --harness=NAME`.
+# HARNESS="claude"
 
 # Volume mounts - array of volumes to mount
 # Syntax options:
@@ -92,13 +103,16 @@ YOLO_PODMAN_OPTIONS=(
     # "--network=host"
 )
 
-# Claude arguments - array of arguments passed to claude
-YOLO_CLAUDE_ARGS=(
-    # "--model=claude-3-opus-20240229"
+# Arguments passed to the active harness (claude or opencode).
+YOLO_HARNESS_ARGS=(
+    # "--model=claude-sonnet-4-6"
 )
 
+# Deprecated alias for YOLO_HARNESS_ARGS. If set, its contents are merged
+# into YOLO_HARNESS_ARGS and yolo prints a warning to stderr.
+# YOLO_CLAUDE_ARGS=()
+
 # Default flags (0 or 1)
-# USE_ANONYMIZED_PATHS=0
 # USE_NVIDIA=0
 # WORKTREE_MODE="ask"
 EOF
@@ -157,14 +171,31 @@ install_config() {
 # Function to expand volume shorthand syntax
 expand_volume() {
     local vol="$1"
-    
+
     # Check for :: syntax first (shorthand with options)
     if [[ "$vol" == *::* ]]; then
-        # Shorthand with options: ~/projects::ro,z
+        # Shorthand with options: ~/projects::ro -> path:path:ro,z
         local path="${vol%%::*}"
         local opts="${vol#*::}"
-        # Expand ~ to $HOME
         path="${path/#\~/$HOME}"
+        if [ -z "$opts" ]; then
+            echo "${path}:${path}:z"
+            return
+        fi
+        # SELinux: append z (shared relabel) unless z or Z already present;
+        # podman treats z and Z as mutually exclusive, so an explicit Z stands.
+        local opt has_relabel=0
+        local IFS=','
+        # shellcheck disable=SC2206
+        local opt_tokens=($opts)
+        unset IFS
+        for opt in "${opt_tokens[@]}"; do
+            if [[ "$opt" == "z" || "$opt" == "Z" ]]; then
+                has_relabel=1
+                break
+            fi
+        done
+        [ "$has_relabel" -eq 0 ] && opts="${opts},z"
         echo "${path}:${path}:${opts}"
     elif [[ "$vol" == *:*:* ]]; then
         # Full form: host:container:options
@@ -180,22 +211,137 @@ expand_volume() {
     fi
 }
 
-# Parse arguments: everything before -- goes to podman, everything after goes to claude
-# Also check for --anonymized-paths, --entrypoint, --worktree, --nvidia, --no-config, and --install-config flags
+# Set per-harness globals based on the harness name.
+#   HARNESS_CMD             — binary to run inside the container
+#   HARNESS_HOST_DIR        — host path of the primary harness config dir
+#                             (the bind source)
+#   HARNESS_CONTAINER_DIR   — in-container path the bind lands at, always under
+#                             /home/agent/... regardless of host $HOME
+#   HARNESS_EXTRA_MOUNTS    — additional host:container:opts entries to bind;
+#                             container targets are under /home/agent/...
+#   HARNESS_CONFIG_ENV_NAME — env var the harness reads for its config dir
+#                             (set in container to HARNESS_CONTAINER_DIR)
+#   HARNESS_DEFAULT_ARGS    — args injected before user-supplied harness args
+#                             (the harness's "skip all permission prompts" flag)
+#   HARNESS_INJECT_NAME     — 1 to also inject --name=<container-name> (claude)
+#   HARNESS_ENV_PASSTHROUGH — names of env vars to forward into the container
+#                             with `-e NAME` (no value bound; podman picks from
+#                             the caller's environment)
+#   HARNESS_FORCED_ENV       — `KEY=VALUE` entries set unconditionally inside
+#                             the container, regardless of host env. Used for
+#                             harnesses that read their yolo-mode signal from
+#                             the environment instead of a CLI flag.
+#
+# Why fixed /home/agent/... container paths: the container user is `agent`
+# with HOME=/home/agent baked into /etc/passwd. Mounting at host $HOME paths
+# (which on a host like /home/alice is /home/alice/...) leaves the harness
+# looking at the empty pre-created dirs under /home/agent. Container-relative
+# targets remove the host-home dependency entirely; host paths can be
+# anything.
+select_harness() {
+    local name="$1"
+    HARNESS_EXTRA_MOUNTS=()
+    HARNESS_DEFAULT_ARGS=()
+    HARNESS_ENV_PASSTHROUGH=()
+    HARNESS_FORCED_ENV=()
+    HARNESS_CONFIG_ENV_NAME=""
+    HARNESS_INJECT_NAME=0
+    case "$name" in
+        claude)
+            HARNESS_CMD="claude"
+            HARNESS_HOST_DIR="$HOME/.claude"
+            HARNESS_CONTAINER_DIR="/home/agent/.claude"
+            HARNESS_CONFIG_ENV_NAME="CLAUDE_CONFIG_DIR"
+            HARNESS_DEFAULT_ARGS=("--dangerously-skip-permissions")
+            HARNESS_INJECT_NAME=1
+            HARNESS_ENV_PASSTHROUGH=("CLAUDE_CODE_OAUTH_TOKEN" "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS")
+            ;;
+        opencode)
+            HARNESS_CMD="opencode"
+            HARNESS_HOST_DIR="$HOME/.config/opencode"
+            HARNESS_CONTAINER_DIR="/home/agent/.config/opencode"
+            HARNESS_EXTRA_MOUNTS=(
+                "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:z"
+                "$HOME/.claude/skills:/home/agent/.claude/skills:ro,z"
+                "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
+            )
+            # opencode reads its yolo-mode signal from the environment, not a
+            # CLI flag; passing --dangerously-skip-permissions to current
+            # opencode versions causes it to print help and exit.
+            HARNESS_FORCED_ENV=("OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true")
+            HARNESS_ENV_PASSTHROUGH=("OPENAI_API_KEY" "ANTHROPIC_API_KEY" "OPENROUTER_API_KEY" "GROQ_API_KEY" "GEMINI_API_KEY")
+            ;;
+        codex)
+            # Codex harness is planned but temporarily disabled. The original
+            # profile config is preserved below as a comment so re-enabling is
+            # uncomment-the-block + remove this error.
+            #
+            # Why disabled: codex is npm-distributed and forced yolo-base to bake
+            # node + a global npm prefix into `~/.npmrc`, which collides with
+            # nvm in `.yolo/user-setup.sh`. Deferred until codex ships a static
+            # binary or we route the install through a non-prefix-mutating path.
+            # See also: commented `npm install -g @openai/codex` in images/Dockerfile.
+            echo "Error: codex harness is planned but not yet enabled in this build of yolo." >&2
+            echo "       Use --harness=claude or --harness=opencode for now." >&2
+            exit 1
+            # HARNESS_CMD="codex"
+            # HARNESS_HOST_DIR="$HOME/.codex"
+            # HARNESS_CONTAINER_DIR="/home/agent/.codex"
+            # HARNESS_CONFIG_ENV_NAME="CODEX_HOME"
+            # HARNESS_EXTRA_MOUNTS=(
+            #     "$HOME/.claude/skills:/home/agent/.claude/skills:ro,z"
+            #     "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
+            # )
+            # HARNESS_DEFAULT_ARGS=("--dangerously-bypass-approvals-and-sandbox")
+            # HARNESS_ENV_PASSTHROUGH=("OPENAI_API_KEY")
+            ;;
+        *)
+            echo "Error: Unknown harness '$name'. Valid: claude, opencode (codex planned)." >&2
+            exit 1
+            ;;
+    esac
+}
+
+# Heuristic: warn when a token looks like a podman flag but no `--` separator
+# was found. Without `--`, all unrecognized tokens get routed to the harness,
+# which silently drops podman flags. We catch the common, high-confidence
+# cases and nudge the user toward the right syntax. Opt out with
+# YOLO_NO_AMBIGUOUS_WARN=1.
+warn_ambiguous_args() {
+    [ "${YOLO_NO_AMBIGUOUS_WARN:-0}" = "1" ] && return 0
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            -v|-p|-e|--volume|--publish|--env|--network|--memory|--cpus|--shm-size|--device|--volume=*|--publish=*|--env=*|--network=*|--memory=*|--cpus=*|--shm-size=*|--device=*)
+                echo "yolo: '$arg' looks like a podman flag but no '--' separator was found." >&2
+                echo "      Without '--', all unrecognized args go to the harness. To pass" >&2
+                echo "      podman flags, separate them from harness args with '--', e.g.:" >&2
+                echo "        yolo $arg -- <harness-args>" >&2
+                echo "      Silence this warning with YOLO_NO_AMBIGUOUS_WARN=1." >&2
+                return 0
+                ;;
+        esac
+    done
+}
+
+# Parse arguments: everything before -- goes to podman, everything after goes
+# to the harness. Also recognizes --harness, --entrypoint, --worktree,
+# --nvidia, --no-config, --install-config.
 PODMAN_ARGS=()
-CLAUDE_ARGS=()
+HARNESS_ARGS=()
 found_separator=0
-USE_ANONYMIZED_PATHS=0
-ENTRYPOINT="claude"
+ENTRYPOINT=""         # set only by --entrypoint=, bypasses the harness profile
 WORKTREE_MODE="ask"
 USE_NVIDIA=0
 USE_CONFIG=1
 FORCE_REBUILD=0
+HARNESS_CLI=""        # set by --harness=, overrides config HARNESS=
 
 # Initialize config arrays
 YOLO_PODMAN_VOLUMES=()
 YOLO_PODMAN_OPTIONS=()
 YOLO_CLAUDE_ARGS=()
+YOLO_HARNESS_ARGS=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -205,13 +351,42 @@ while [ $# -gt 0 ]; do
         --install-config)
             install_config
             ;;
+        --harness)
+            if [ $# -lt 2 ] || [[ "$2" == -* ]]; then
+                echo "Error: --harness requires a value (claude or opencode; codex planned)" >&2
+                exit 1
+            fi
+            HARNESS_CLI="$2"
+            shift 2
+            ;;
+        --harness=*)
+            HARNESS_CLI="${1#--harness=}"
+            shift
+            ;;
         --entrypoint)
+            if [ $# -lt 2 ] || [[ "$2" == -* ]]; then
+                echo "Error: --entrypoint requires a value (e.g. bash, claude, opencode)" >&2
+                exit 1
+            fi
             ENTRYPOINT="$2"
             shift 2
             ;;
         --entrypoint=*)
             ENTRYPOINT="${1#--entrypoint=}"
             shift
+            ;;
+        --worktree)
+            if [ $# -lt 2 ] || [[ "$2" == -* ]]; then
+                echo "Error: --worktree requires a value (ask, bind, skip, or error)" >&2
+                exit 1
+            fi
+            WORKTREE_MODE="$2"
+            if [[ ! "$WORKTREE_MODE" =~ ^(ask|bind|skip|error)$ ]]; then
+                echo "Error: Invalid --worktree value: $WORKTREE_MODE" >&2
+                echo "Valid values are: ask, bind, skip, error" >&2
+                exit 1
+            fi
+            shift 2
             ;;
         --worktree=*)
             WORKTREE_MODE="${1#--worktree=}"
@@ -221,10 +396,6 @@ while [ $# -gt 0 ]; do
                 echo "Valid values are: ask, bind, skip, error" >&2
                 exit 1
             fi
-            shift
-            ;;
-        --anonymized-paths)
-            USE_ANONYMIZED_PATHS=1
             shift
             ;;
         --nvidia)
@@ -239,15 +410,24 @@ while [ $# -gt 0 ]; do
             FORCE_REBUILD=1
             shift
             ;;
+        --anonymized-paths)
+            # Removed in the multi-harness refactor: container paths are now
+            # fixed at /home/agent/... regardless of host HOME, so the
+            # anonymized-paths toggle no longer applies. Consume the token
+            # and warn — old wrapper scripts shouldn't see it leak to the
+            # harness as an unknown flag.
+            echo "yolo: --anonymized-paths was removed; container paths are fixed at /home/agent/..." >&2
+            shift
+            ;;
         --)
             shift
             found_separator=1
-            CLAUDE_ARGS=("$@")
+            HARNESS_ARGS=("$@")
             break
             ;;
         *)
             if [ "$found_separator" -eq 1 ]; then
-                CLAUDE_ARGS+=("$1")
+                HARNESS_ARGS+=("$1")
             else
                 PODMAN_ARGS+=("$1")
             fi
@@ -257,8 +437,10 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$found_separator" = 0 ]; then
-    # so we did not find any -- everything is actually CLAUDE_ARGS
-    CLAUDE_ARGS=("${PODMAN_ARGS[@]}")
+    # No -- found: warn if anything looks like a misplaced podman flag, then
+    # treat everything unrecognized as harness args.
+    warn_ambiguous_args "${PODMAN_ARGS[@]}"
+    HARNESS_ARGS=("${PODMAN_ARGS[@]}")
     PODMAN_ARGS=()
 fi
 
@@ -305,27 +487,46 @@ if [ "$USE_CONFIG" -eq 1 ]; then
         if [ -f "$config_file" ]; then
             # Source the config file
             source "$config_file"
-            
+
             # Process volumes and expand shorthand syntax
             for vol in "${YOLO_PODMAN_VOLUMES[@]}"; do
                 expanded=$(expand_volume "$vol")
                 PODMAN_ARGS=("-v" "$expanded" "${PODMAN_ARGS[@]}")
             done
-            
+
             # Add podman options
             for opt in "${YOLO_PODMAN_OPTIONS[@]}"; do
                 PODMAN_ARGS=("$opt" "${PODMAN_ARGS[@]}")
             done
-            
-            # Add claude args
-            if [ ${#YOLO_CLAUDE_ARGS[@]} -gt 0 ]; then
-                CLAUDE_ARGS=("${YOLO_CLAUDE_ARGS[@]}" "${CLAUDE_ARGS[@]}")
-            fi
         fi
     fi
 fi
 
-BASE_IMAGE="con-bomination-claude-code"
+# Resolve the active harness. Precedence (highest first):
+#   1. --harness=NAME on the CLI (sets HARNESS_CLI).
+#   2. HARNESS=name in .git/yolo/config (sourced above into $HARNESS).
+#   3. HARNESS in the calling shell's environment (inherited into $HARNESS).
+#   4. Default "claude".
+if [ -n "$HARNESS_CLI" ]; then
+    HARNESS="$HARNESS_CLI"
+fi
+HARNESS="${HARNESS:-claude}"
+select_harness "$HARNESS"
+
+# YOLO_CLAUDE_ARGS is the deprecated former name of YOLO_HARNESS_ARGS. If set,
+# merge its contents into YOLO_HARNESS_ARGS (CLAUDE_ARGS first so HARNESS_ARGS
+# wins on conflicts) and warn once. After this block only YOLO_HARNESS_ARGS is
+# used downstream.
+if [ ${#YOLO_CLAUDE_ARGS[@]} -gt 0 ]; then
+    echo "yolo: YOLO_CLAUDE_ARGS is deprecated, use YOLO_HARNESS_ARGS." >&2
+    YOLO_HARNESS_ARGS=("${YOLO_CLAUDE_ARGS[@]}" "${YOLO_HARNESS_ARGS[@]}")
+    YOLO_CLAUDE_ARGS=()
+fi
+if [ ${#YOLO_HARNESS_ARGS[@]} -gt 0 ]; then
+    HARNESS_ARGS=("${YOLO_HARNESS_ARGS[@]}" "${HARNESS_ARGS[@]}")
+fi
+
+BASE_IMAGE="yolo-base"
 
 # Portable SHA-256: prefer GNU sha256sum, fall back to BSD shasum (macOS).
 if command -v sha256sum >/dev/null 2>&1; then
@@ -376,7 +577,7 @@ resolve_image() {
 
     # Compute hash from base image ID + script contents.
     # The |root|/|user| delimiters are required: root-setup.sh and user-setup.sh
-    # run in different Dockerfile stages (as root vs the claude user), so identical
+    # run in different Dockerfile stages (as root vs the agent user), so identical
     # content in different files must produce different hashes.
     local base_id
     base_id=$(podman image inspect "$BASE_IMAGE" --format '{{.Id}}' 2>/dev/null)
@@ -406,7 +607,7 @@ resolve_image() {
         dockerfile+="USER root"$'\n'
         dockerfile+="RUN /tmp/root-setup.sh"$'\n'
         dockerfile+="RUN rm -f /tmp/root-setup.sh"$'\n'
-        dockerfile+="USER claude"$'\n'
+        dockerfile+="USER agent"$'\n'
     fi
 
     if [ "$has_user_setup" -eq 1 ]; then
@@ -434,9 +635,21 @@ IMAGE_NAME=$(resolve_image)
 # Note: leading periods and underscores are stripped as they're not allowed in container names
 name=$( echo "$PWD-$$" | sed -e "s,^$HOME/,,g" -e "s,[^a-zA-Z0-9_.-],_,g" -e "s,^[._]*,," )
 
-CLAUDE_HOME_DIR="$HOME/.claude"
-# must exist but might not if first start on that box
-mkdir -p "$CLAUDE_HOME_DIR"
+# Pre-create the host source dir for every bind mount so the first run on a
+# new machine doesn't fail with "no such file" before podman gets a chance to
+# create the empty target. Side effect: for non-claude harnesses, the shared
+# read-only skill mounts ($HOME/.claude/skills and $HOME/.agents/skills) may
+# materialize as empty dirs on a host that has never installed Claude. This
+# is intentional — opencode (and codex, when re-enabled) both consume the
+# shared skills tree, and an empty dir is harmless.
+prepare_host_mount_dirs() {
+    local _m
+    mkdir -p "$HARNESS_HOST_DIR"
+    for _m in "${HARNESS_EXTRA_MOUNTS[@]}"; do
+        mkdir -p "${_m%%:*}"
+    done
+}
+prepare_host_mount_dirs
 
 # Detect if we're in a git worktree and find the original repo
 WORKTREE_MOUNTS=()
@@ -500,30 +713,25 @@ if [ "$is_worktree" -eq 1 ]; then
     esac
 fi
 
-# Determine paths based on --anonymized-paths flag
-if [ "$USE_ANONYMIZED_PATHS" -eq 1 ]; then
-    # Old behavior: use anonymized paths
-    CLAUDE_DIR="/claude"
-    WORKSPACE_DIR="/workspace"
-    CLAUDE_MOUNT="$CLAUDE_HOME_DIR:/claude:z"
-    WORKSPACE_MOUNT="$(pwd):/workspace:z"
-else
-    # New default behavior: preserve original host paths
-    CLAUDE_DIR="$CLAUDE_HOME_DIR"
-    WORKSPACE_DIR="$(pwd)"
-    CLAUDE_MOUNT="$CLAUDE_HOME_DIR:$CLAUDE_HOME_DIR:z"
-    WORKSPACE_MOUNT="$(pwd):$(pwd):z"
-fi
+# Compose the primary harness bind: host source → fixed /home/agent/... target.
+# Workspace stays at the host path so claude session resume keys (which hash
+# the workspace path) match between native and containerized runs.
+HARNESS_MOUNT="$HARNESS_HOST_DIR:$HARNESS_CONTAINER_DIR:z"
+WORKSPACE_DIR="$(pwd)"
+WORKSPACE_MOUNT="$(pwd):$(pwd):z"
 
-# Build the command to run inside the container
-if [ "$ENTRYPOINT" = "claude" ]; then
-    # Reuse the podman container name as the claude session display name so the
-    # two share an identifier and the session is easy to find in /resume.
-    # Placed before CLAUDE_ARGS so a user-supplied --name in CLAUDE_ARGS wins.
-    CONTAINER_CMD=("claude" "--dangerously-skip-permissions" "--name=$name" "${CLAUDE_ARGS[@]}")
+# Build the command to run inside the container.
+# --entrypoint=CMD is a power-user override that bypasses the harness profile
+# entirely — no default args, no auto --name injection.
+if [ -n "$ENTRYPOINT" ]; then
+    CONTAINER_CMD=("$ENTRYPOINT" "${HARNESS_ARGS[@]}")
+elif [ "$HARNESS_INJECT_NAME" -eq 1 ]; then
+    # Reuse the podman container name as the harness session display name so
+    # the two share an identifier and the session is easy to find in /resume.
+    # Placed before HARNESS_ARGS so a user-supplied --name wins.
+    CONTAINER_CMD=("$HARNESS_CMD" "${HARNESS_DEFAULT_ARGS[@]}" "--name=$name" "${HARNESS_ARGS[@]}")
 else
-    # Custom entrypoint: run as-is with any additional args
-    CONTAINER_CMD=("$ENTRYPOINT" "${CLAUDE_ARGS[@]}")
+    CONTAINER_CMD=("$HARNESS_CMD" "${HARNESS_DEFAULT_ARGS[@]}" "${HARNESS_ARGS[@]}")
 fi
 
 # NVIDIA GPU support via CDI (Container Device Interface)
@@ -541,7 +749,7 @@ if [ "$USE_NVIDIA" -eq 1 ]; then
     NVIDIA_ARGS+=(--security-opt "label=disable")
 fi
 
-# Map host user to in-container UID/GID 1000 (the pinned claude user).
+# Map host user to in-container UID/GID 1000 (the pinned agent user).
 # podman >= 4.3 supports keep-id:uid=N,gid=N which handles this directly.
 # Older podman (e.g. Ubuntu 22.04 ships 3.4) needs the legacy --user= form,
 # which only works correctly when the host UID is also 1000.
@@ -554,18 +762,46 @@ else
     fi
 fi
 
+# Compose per-harness env args. If the harness exposes a config-dir env var,
+# point it at the in-container path of the bind mount. Then forward each
+# passthrough env var by name (-e VAR with no value picks up the host value).
+build_harness_env_args() {
+    local _var _kv
+    HARNESS_ENV_ARGS=()
+    if [ -n "$HARNESS_CONFIG_ENV_NAME" ]; then
+        HARNESS_ENV_ARGS+=(-e "$HARNESS_CONFIG_ENV_NAME=$HARNESS_CONTAINER_DIR")
+    fi
+    for _kv in "${HARNESS_FORCED_ENV[@]}"; do
+        HARNESS_ENV_ARGS+=(-e "$_kv")
+    done
+    for _var in "${HARNESS_ENV_PASSTHROUGH[@]}"; do
+        HARNESS_ENV_ARGS+=(-e "$_var")
+    done
+}
+build_harness_env_args
+
+# Compose extra config mounts (e.g. opencode's ~/.local/share/opencode).
+build_harness_extra_mount_args() {
+    local _m
+    HARNESS_EXTRA_MOUNT_ARGS=()
+    for _m in "${HARNESS_EXTRA_MOUNTS[@]}"; do
+        HARNESS_EXTRA_MOUNT_ARGS+=(-v "$_m")
+    done
+}
+build_harness_extra_mount_args
+
 podman run --log-driver=none -it --rm \
     "${USERNS_ARGS[@]}" \
     --name="$name" \
-    -v "$CLAUDE_MOUNT" \
+    -v "$HARNESS_MOUNT" \
+    "${HARNESS_EXTRA_MOUNT_ARGS[@]}" \
     -v "$HOME/.gitconfig:/tmp/.gitconfig:ro,z" \
     -v "$WORKSPACE_MOUNT" \
     "${WORKTREE_MOUNTS[@]}" \
     -w "$WORKSPACE_DIR" \
-    -e CLAUDE_CONFIG_DIR="$CLAUDE_DIR" \
+    "${HARNESS_ENV_ARGS[@]}" \
     -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \
-    -e CLAUDE_CODE_OAUTH_TOKEN \
-    -e CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS \
+    -e "YOLO_HARNESS=$HARNESS" \
     "${NVIDIA_ARGS[@]}" \
     "${PODMAN_ARGS[@]}" \
     "$IMAGE_NAME" \
