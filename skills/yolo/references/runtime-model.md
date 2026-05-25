@@ -7,10 +7,12 @@ Host source → container target. Container targets under `/home/agent/...` are 
 | Host | Container | Mode | Active when |
 |---|---|---|---|
 | `$HOME/.claude` | `/home/agent/.claude` | rw | `HARNESS=claude` |
+| `$HOME/.claude` | `/home/agent/.claude` | ro | `HARNESS=opencode` |
 | `$HOME/.config/opencode` | `/home/agent/.config/opencode` | rw | `HARNESS=opencode` |
+| `$HOME/.config/opencode` | `/home/agent/.config/opencode` | ro | `HARNESS=claude` |
 | `$HOME/.local/share/opencode` | `/home/agent/.local/share/opencode` | rw | `HARNESS=opencode` |
-| `$HOME/.claude/skills` | `/home/agent/.claude/skills` | ro | `HARNESS=opencode` |
-| `$HOME/.agents/skills` | `/home/agent/.agents/skills` | ro | `HARNESS=opencode` |
+| `$HOME/.local/share/opencode` | `/home/agent/.local/share/opencode` | ro | `HARNESS=claude` |
+| `$HOME/.agents/skills` | `/home/agent/.agents/skills` | ro | all |
 | `$HOME/.gitconfig` | `/tmp/.gitconfig` | ro | always |
 | `$(pwd)` | `$(pwd)` | rw | always |
 | `<original_repo>` | `<original_repo>` | rw | worktree, when bound |
@@ -21,7 +23,7 @@ Host source → container target. Container targets under `/home/agent/...` are 
 
 The workspace mount preserves the host path on both sides so harness session resume (which keys on the workspace path) interops between containerized and native runs.
 
-The ro skill mounts make any skill installed at the standard host locations discoverable by opencode. Claude doesn't need separate skill mounts because its full `~/.claude` rw mount already covers `~/.claude/skills/`; claude does not read `~/.agents/skills/`.
+The ro skill mounts make any skill installed at the standard host locations discoverable by opencode. Claude doesn't need a separate `$HOME/.claude/skills` ro mount because its full `~/.claude` rw mount already covers `~/.claude/skills/`. The cross-harness ro mounts (`$HOME/.claude` for opencode, opencode's dirs for claude) ensure every harness can read every other harness's data — skills, plans, projects, config — regardless of which is active.
 
 ### Worktree binding
 

@@ -178,7 +178,7 @@ the in-container command. Profiles for the currently active harnesses:
 | Host source dir(s)     | `$HOME/.claude`              | `$HOME/.config/opencode` + `$HOME/.local/share/opencode`            |
 | Container target dir(s) | `/home/agent/.claude`       | `/home/agent/.config/opencode` + `/home/agent/.local/share/opencode` |
 | Config env var set     | `CLAUDE_CONFIG_DIR=/home/agent/.claude` | (none — XDG resolves to `/home/agent/.config/opencode`)   |
-| Extra ro mounts (host → container) | (none — `~/.claude` rw already covers skills) | `$HOME/.claude/skills → /home/agent/.claude/skills`, `$HOME/.agents/skills → /home/agent/.agents/skills` |
+| Extra ro mounts (host → container) | `$HOME/.config/opencode → /home/agent/.config/opencode`, `$HOME/.local/share/opencode → /home/agent/.local/share/opencode` | `$HOME/.claude → /home/agent/.claude`, `$HOME/.agents/skills → /home/agent/.agents/skills` |
 | Env vars forwarded (`-e NAME`) | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
 | Env vars force-set (`-e KEY=VALUE`) | (none)                  | `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true`                        |
 
@@ -191,7 +191,7 @@ harness that falls back to `$HOME` (opencode reads its config from
 lands, regardless of the host user.
 
 The first listed host source dir is created on first run if missing.
-Extra mounts (opencode's data dir, the cross-harness skill paths) are
+Extra mounts (the cross-harness data paths) are
 also created. The ro skill mounts give opencode access to any skill
 installed at the standard host locations; claude already sees them
 through its full `~/.claude` rw mount.
@@ -409,6 +409,6 @@ The profile, when re-enabled, is:
 | Host source dir(s)     | `$HOME/.codex`                                   |
 | Container target dir(s) | `/home/agent/.codex`                            |
 | Config env var set     | `CODEX_HOME=/home/agent/.codex`                  |
-| Extra ro mounts        | `$HOME/.claude/skills → /home/agent/.claude/skills`, `$HOME/.agents/skills → /home/agent/.agents/skills` |
+| Extra ro mounts        | `$HOME/.claude → /home/agent/.claude`, `$HOME/.agents/skills → /home/agent/.agents/skills` |
 | Env vars forwarded     | `OPENAI_API_KEY`                                 |
 | Env vars force-set     | (none)                                           |

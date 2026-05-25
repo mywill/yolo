@@ -396,7 +396,7 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo "  podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \\"
     echo "    -v \"\$HOME/.config/opencode:/home/agent/.config/opencode:z\" \\"
     echo "    -v \"\$HOME/.local/share/opencode:/home/agent/.local/share/opencode:z\" \\"
-    echo "    -v \"\$HOME/.claude/skills:/home/agent/.claude/skills:ro,z\" \\"
+    echo "    -v \"\$HOME/.claude:/home/agent/.claude:ro,z\" \\"
     echo "    -v \"\$HOME/.agents/skills:/home/agent/.agents/skills:ro,z\" \\"
     echo "    -v \"\$HOME/.gitconfig:/tmp/.gitconfig:ro,z\" \\"
     echo "    -v \"\$(pwd):\$(pwd):z\" \\"

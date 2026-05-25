@@ -15,7 +15,7 @@ description: Help users install, configure, modify, or troubleshoot yolo — a c
 - **rw mounts (host → container)**: `$(pwd)` at the same host path, plus the active harness's config dir(s) at fixed `/home/agent/...` targets:
   - claude: `$HOME/.claude → /home/agent/.claude`
   - opencode: `$HOME/.config/opencode → /home/agent/.config/opencode` and `$HOME/.local/share/opencode → /home/agent/.local/share/opencode`
-- **ro mounts (opencode only while codex is deferred)**: `$HOME/.claude/skills → /home/agent/.claude/skills` and `$HOME/.agents/skills → /home/agent/.agents/skills` so the yolo skill (and any other user-installed skills) are discoverable. Claude harness sees both via its full `~/.claude` rw mount.
+- **ro mounts (both harnesses cross-mount each other's data)**: `$HOME/.claude → /home/agent/.claude` and `$HOME/.agents/skills → /home/agent/.agents/skills` for opencode; `$HOME/.config/opencode → /home/agent/.config/opencode` and `$HOME/.local/share/opencode → /home/agent/.local/share/opencode` for claude. Every harness sees every other harness's config and skills regardless of which is active.
 - **ro mount**: `$HOME/.gitconfig` at `/tmp/.gitconfig`.
 - **Not mounted**: `~/.ssh`, host root. `git push` over SSH fails by default.
 - **Why fixed container paths**: keeps the in-container layout independent of the host `$HOME` (e.g. `/home/alice` vs `/home/bob`). Harnesses that fall back to `$HOME` (opencode) find their data because `$HOME=/home/agent` always.

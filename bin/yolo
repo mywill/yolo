@@ -255,6 +255,10 @@ select_harness() {
             HARNESS_DEFAULT_ARGS=("--dangerously-skip-permissions")
             HARNESS_INJECT_NAME=1
             HARNESS_ENV_PASSTHROUGH=("CLAUDE_CODE_OAUTH_TOKEN" "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS")
+            HARNESS_EXTRA_MOUNTS=(
+                "$HOME/.config/opencode:/home/agent/.config/opencode:ro,z"
+                "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z"
+            )
             ;;
         opencode)
             HARNESS_CMD="opencode"
@@ -262,7 +266,7 @@ select_harness() {
             HARNESS_CONTAINER_DIR="/home/agent/.config/opencode"
             HARNESS_EXTRA_MOUNTS=(
                 "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:z"
-                "$HOME/.claude/skills:/home/agent/.claude/skills:ro,z"
+"$HOME/.claude:/home/agent/.claude:ro,z"
                 "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
             )
             # opencode reads its yolo-mode signal from the environment, not a
@@ -289,7 +293,7 @@ select_harness() {
             # HARNESS_CONTAINER_DIR="/home/agent/.codex"
             # HARNESS_CONFIG_ENV_NAME="CODEX_HOME"
             # HARNESS_EXTRA_MOUNTS=(
-            #     "$HOME/.claude/skills:/home/agent/.claude/skills:ro,z"
+            #     "$HOME/.claude:/home/agent/.claude:ro,z"
             #     "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
             # )
             # HARNESS_DEFAULT_ARGS=("--dangerously-bypass-approvals-and-sandbox")

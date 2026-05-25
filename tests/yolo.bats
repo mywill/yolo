@@ -276,6 +276,8 @@ EOF
     assert_success
     podman_log_has_arg "$HOME/.claude:/home/agent/.claude:z"
     podman_log_has_arg "CLAUDE_CONFIG_DIR=/home/agent/.claude"
+    podman_log_has_arg "$HOME/.config/opencode:/home/agent/.config/opencode:ro,z"
+    podman_log_has_arg "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z"
 }
 
 @test "default mode: workspace mounts at host \$(pwd) on both sides" {
@@ -620,7 +622,10 @@ EOF
     [ "${HARNESS_DEFAULT_ARGS[0]}" = "--dangerously-skip-permissions" ]
     [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" CLAUDE_CODE_OAUTH_TOKEN "* ]]
     [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS "* ]]
-    [ "${#HARNESS_EXTRA_MOUNTS[@]}" -eq 0 ]
+    [ "${#HARNESS_ENV_PASSTHROUGH[@]}" -eq 2 ]
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.config/opencode:/home/agent/.config/opencode:ro,z "* ]]
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.local/share/opencode:/home/agent/.local/share/opencode:ro,z "* ]]
+    [ "${#HARNESS_EXTRA_MOUNTS[@]}" -eq 2 ]
 }
 
 @test "select_harness:opencode sets opencode profile globals" {
@@ -636,7 +641,7 @@ EOF
     [[ " ${HARNESS_FORCED_ENV[*]} " == *" OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true "* ]]
     # opencode extra mounts: host source -> /home/agent/... container target
     [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.local/share/opencode:/home/agent/.local/share/opencode:z "* ]]
-    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.claude/skills:/home/agent/.claude/skills:ro,z "* ]]
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.claude:/home/agent/.claude:ro,z "* ]]
     [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.agents/skills:/home/agent/.agents/skills:ro,z "* ]]
     [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" OPENAI_API_KEY "* ]]
     [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" ANTHROPIC_API_KEY "* ]]
@@ -657,11 +662,7 @@ EOF
     [ "${HARNESS_DEFAULT_ARGS[0]}" = "--dangerously-bypass-approvals-and-sandbox" ]
     [ "${HARNESS_ENV_PASSTHROUGH[0]}" = "OPENAI_API_KEY" ]
     # codex extra mounts: host source -> /home/agent/... container target
-    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.claude/skills:/home/agent/.claude/skills:ro,z "* ]]
-    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.agents/skills:/home/agent/.agents/skills:ro,z "* ]]
-}
-
-@test "--harness=codex errors with 'planned but not yet enabled' (deferred)" {
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.claude:/home/agent/.claude:ro,z "* ]]
     run_yolo --harness=codex
     assert_failure
     assert_output --partial "codex harness is planned but not yet enabled"
@@ -990,7 +991,7 @@ EOF
 @test "--harness=opencode mounts skills at /home/agent/... read-only" {
     run_yolo --harness=opencode
     assert_success
-    podman_log_has_arg "$HOME/.claude/skills:/home/agent/.claude/skills:ro,z"
+    podman_log_has_arg "$HOME/.claude:/home/agent/.claude:ro,z"
     podman_log_has_arg "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
 }
 
@@ -998,16 +999,20 @@ EOF
     skip "codex harness temporarily disabled — see SPEC.md §10"
     run_yolo --harness=codex
     assert_success
-    podman_log_has_arg "$HOME/.claude/skills:/home/agent/.claude/skills:ro,z"
+    podman_log_has_arg "$HOME/.claude:/home/agent/.claude:ro,z"
     podman_log_has_arg "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
 }
 
-@test "default claude harness does NOT add the ro skill mounts (full ~/.claude is already mounted rw)" {
+@test "default claude harness mounts opencode dirs read-only for cross-access" {
     run_yolo
     assert_success
-    # Claude already mounts the full ~/.claude rw at /home/agent/.claude,
-    # which covers skills. Adding overlapping ro skill mounts would be
-    # redundant and confuse podman.
+    podman_log_has_arg "$HOME/.config/opencode:/home/agent/.config/opencode:ro,z"
+    podman_log_has_arg "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z"
+}
+
+@test "default claude harness does NOT add overlapping .claude/skills ro mount" {
+    run_yolo
+    assert_success
     run podman_log_has_arg "$HOME/.claude/skills:/home/agent/.claude/skills:ro,z"
     assert_failure
 }
