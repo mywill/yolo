@@ -157,18 +157,24 @@ do_prune() {
 
     while IFS= read -r cid; do
         [ -z "$cid" ] && continue
-        podman rm "$cid" 2>/dev/null && ((c_count++)) || true
+        if podman rm "$cid" 2>/dev/null; then
+            c_count=$((c_count + 1))
+        fi
     done < <(podman ps -a --filter "status=exited" -q 2>/dev/null)
 
     while IFS= read -r img; do
         [ -z "$img" ] && continue
         [ "$img" = "yolo-base" ] || [ "$img" = "yolo-base:latest" ] && continue
-        podman rmi "$img" 2>/dev/null && ((i_count++)) || true
+        if podman rmi "$img" 2>/dev/null; then
+            i_count=$((i_count + 1))
+        fi
     done < <(podman images --filter "reference=yolo-*" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
 
     while IFS= read -r img; do
         [ -z "$img" ] && continue
-        podman rmi "$img" 2>/dev/null && ((d_count++)) || true
+        if podman rmi "$img" 2>/dev/null; then
+            d_count=$((d_count + 1))
+        fi
     done < <(podman images --filter "dangling=true" -q 2>/dev/null)
 
     if [ "$c_count" -gt 0 ] || [ "$i_count" -gt 0 ] || [ "$d_count" -gt 0 ]; then
