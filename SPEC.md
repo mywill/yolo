@@ -32,10 +32,12 @@ unrecognized tokens are treated as `HARNESS_ARGS`.
 | `--worktree=MODE`     | `ask`    | `MODE` ∈ {`ask`, `bind`, `skip`, `error`}; anything else is a hard error. Also accepts `--worktree MODE`. |
 | `--nvidia`            | off      | Add `--device nvidia.com/gpu=all --security-opt label=disable`.                                 |
 | `--rebuild`           | off      | Force rebuild of the derived image.                                                             |
+| `--last-image`        | off      | Use the second-most-recent `yolo-<project>-<hash12>` image instead of building a new one. Errors if fewer than 2 images exist. |
+| `--prune`             | —        | One-shot cleanup: remove stopped yolo containers, unused `yolo-*` images (excluding `yolo-base`), and dangling layers. Exits 0. |
 | `--no-config`         | off      | Skip sourcing `.git/yolo/config` (and skip auto-creation).                                      |
 | `--install-config`    | —        | Create `.git/yolo/config` from template if missing; otherwise print existing. Exits 0.          |
 
-`--install-config` and `--help` short-circuit before podman runs.
+`--install-config`, `--prune`, and `--help` short-circuit before podman runs.
 
 ### Ambiguous-arg warning
 
@@ -143,12 +145,17 @@ RUN /tmp/user-setup.sh
 ### Derived image name
 
 ```
-hash_input  = base_image_id
-              [+ "|root|" + contents_of_root-setup.sh   if present]
-              [+ "|user|" + contents_of_user-setup.sh   if present]
+project_name  = sanitize_name(basename($PWD))
+hash_input    = base_image_id
+                [+ "|root|" + contents_of_root-setup.sh   if present]
+                [+ "|user|" + contents_of_user-setup.sh   if present]
 
-derived_tag = "yolo-" + (sha256(hash_input) | head -c 12)
+derived_tag = "yolo-" + project_name + "-" + (sha256(hash_input) | head -c 12)
 ```
+
+`sanitize_name` strips the leading `$HOME/` prefix, replaces non-alphanumeric
+characters with `_`, strips leading `.` and `_` characters, and lowercases the
+result (OCI image names must be lowercase).
 
 The `|root|` / `|user|` delimiters ensure identical bytes in different
 files produce different hashes (the two scripts run in different stages).
@@ -162,6 +169,20 @@ Enforced by `tests/yolo.bats:432–453` (the `resolve_image: only user-setup.sh 
   is reused.
 - Missing base image → exit non-zero with
   `Base image 'yolo-base' not found. Run setup-yolo.sh first.`
+
+### Auto-prune
+
+After each successful build of a derived image, `bin/yolo` keeps the 2 most
+recent images for the project and removes any older images with the same
+`yolo-<project>-` prefix. This prevents accumulation of stale images as
+`.yolo/` scripts change over time.
+
+`--last-image` skips the cache and build phases and uses the
+second-most-recent image instead, as a fallback if `.yolo/` script changes
+break the environment.
+
+`--prune` performs a one-shot cleanup of all stopped yolo containers,
+unused `yolo-*` images (excluding `yolo-base`), and dangling layers.
 
 ## 5. Container runtime
 

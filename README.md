@@ -57,6 +57,8 @@ yolo                          # claude (default harness)
 yolo --harness=opencode
 # yolo --harness=codex        # planned, not yet enabled
 yolo --rebuild                # force rebuild of the project's derived image
+yolo --last-image             # use previous project image as fallback
+yolo --prune                  # prune stopped containers, unused images
 yolo --nvidia                 # GPU passthrough via CDI
 yolo -- "help with this code" # pass args to the harness
 ```
@@ -107,11 +109,48 @@ your-project/
     user-setup.sh   # runs as 'agent' user (rustup, nvm, uv, etc.)
 ```
 
-Both files optional. yolo hashes their contents + the base image ID and builds a derived `yolo-<hash12>` image on first use. Cached on subsequent runs; `--rebuild` forces a rebuild.
+Both files optional. yolo hashes their contents + the base image ID and builds
+a derived `yolo-<project>-<hash12>` image on first use. Cached on subsequent
+runs; `--rebuild` forces a rebuild.
 
-The `.yolo/` contract is harness-independent — the same derived image is reused across all enabled harnesses (and across codex too, once it's re-enabled).
+After each build, only the 2 most recent images for the project are kept;
+older ones are removed automatically. Use `--last-image` to run the previous
+image as a fallback if setup script changes break something.
+
+The `.yolo/` contract is harness-independent — the same derived image is
+reused across all enabled harnesses (and across codex too, once it's re-enabled).
 
 Templates: `images/examples/` (rust, python, node, tauri, full).
+
+## Cleanup
+
+yolo manages disk usage automatically and provides manual cleanup via
+`--prune`.
+
+### Automatic
+
+- **Pre-run container cleanup**: Before each `yolo` invocation, any stopped
+  containers from previous runs in the same project directory are removed.
+  This handles cases where the container wasn't cleaned up by `--rm`
+  (e.g., unclean disconnect, podman crash).
+- **Post-build image pruning**: After building a new derived
+  `yolo-<project>-<hash12>` image, yolo keeps only the 2 most recent
+  images for the project and removes older ones. This prevents
+  accumulation as `.yolo/` scripts change over time.
+
+### Manual
+
+`yolo --prune` exits immediately after cleaning:
+
+- All stopped yolo containers
+- All unused `yolo-*` images (excluding `yolo-base`)
+- All dangling image layers
+
+### Fallback
+
+`yolo --last-image` uses the second-most-recent derived image instead of
+building a new one. Useful when `.yolo/` script changes break the
+environment — you can run with the previous image while fixing the scripts.
 
 ## Project config (`.git/yolo/config`)
 

@@ -193,10 +193,10 @@ if podman image exists "$LEGACY_IMAGE_NAME" 2>/dev/null; then
 fi
 
 # After a base rebuild the base image ID changes, which invalidates every
-# derived 'yolo-<hash12>' image built against the old base. Offer to prune
-# them so they don't accumulate. Skip yolo-base itself. Only runs when the
-# base was actually (re)built this invocation — auto/no-op runs leave the
-# derived cache alone.
+# derived 'yolo-<project>-<hash12>' image built against the old base. Offer
+# to prune them so they don't accumulate. Skip yolo-base itself. Only runs
+# when the base was actually (re)built this invocation — auto/no-op runs
+# leave the derived cache alone.
 if [ "$BASE_REBUILT" = true ]; then
     ORPHAN_TAGS=()
     while IFS= read -r _tag; do

@@ -21,18 +21,27 @@ OPTIONS:
                          (default: ask). Also accepts --worktree MODE.
     --nvidia             Enable NVIDIA GPU passthrough via CDI
                          Requires nvidia-container-toolkit on host
-    --rebuild            Force rebuild of the project's derived container image
-                         (only relevant when .yolo/ setup scripts exist)
+     --rebuild            Force rebuild of the project's derived container image
+                          (only relevant when .yolo/ setup scripts exist)
+    --last-image         Use the previous project image instead of building a
+                          new one (fallback when .yolo/ scripts break something)
+    --prune              Prune stopped containers, unused yolo-* images, and
+                          dangling layers, then exit
     --no-config          Ignore project configuration file
     --install-config     Create/display .git/yolo/config template
 
     Additional podman options can be passed before --
+
+    Derived images are named yolo-<project>-<hash12>. After building a new
+    image, only the 2 most recent are kept; older ones are removed.
 
 EXAMPLES:
     yolo                              # Run claude (default harness)
     yolo --harness=opencode           # Run opencode
     yolo --nvidia                     # With GPU support
     yolo --rebuild                    # Force rebuild project image
+    yolo --last-image                 # Use previous image as fallback
+    yolo --prune                      # Clean up podman disk usage
     yolo -v /data:/data               # Extra mount
     yolo -- "help with this code"     # Pass args to the harness
     yolo --harness=opencode -- --model=…  # Pass args to a non-default harness
@@ -72,6 +81,102 @@ PROJECT CONFIGURATION:
     - WORKTREE_MODE: ask, bind, skip, or error
 
 EOF
+    exit 0
+}
+
+# Sanitize a name for use as a container/image name: strip HOME prefix, replace
+# non-alphanumeric characters with underscores, strip leading dots/underscores,
+# and lowercase (podman image names must be lowercase per OCI spec).
+sanitize_name() {
+    echo "$1" | sed -e "s,^$HOME/,,g" -e "s,[^a-zA-Z0-9_.-],_,g" -e "s,^[._]*,," | tr '[:upper:]' '[:lower:]'
+}
+
+# Find the second most recent project image (for --last-image).
+find_previous_project_image() {
+    local proj_name="$1"
+    local images=()
+
+    while IFS= read -r img; do
+        [ -z "$img" ] && continue
+        images+=("$img")
+    done < <(podman images --filter "reference=yolo-${proj_name}-*" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
+
+    [ ${#images[@]} -lt 2 ] && return 1
+
+    local timestamps=()
+    local img ts
+    for img in "${images[@]}"; do
+        ts=$(podman image inspect "$img" --format '{{.Created}}' 2>/dev/null || echo "0")
+        timestamps+=("$ts"$'\t'"$img")
+    done
+
+    local sorted=()
+    while IFS=$'\t' read -r _ img; do
+        sorted+=("$img")
+    done < <(printf '%s\n' "${timestamps[@]}" | sort -r)
+
+    echo "${sorted[1]}"
+}
+
+# After building a new project image, keep only the N newest and remove the rest.
+prune_old_project_images() {
+    local proj_name="$1"
+    local current="$2"
+    local keep="${3:-2}"
+
+    local images=()
+    while IFS= read -r img; do
+        [ -z "$img" ] && continue
+        [ "$img" = "$current" ] && continue
+        images+=("$img")
+    done < <(podman images --filter "reference=yolo-${proj_name}-*" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
+
+    [ ${#images[@]} -le $((keep - 1)) ] && return
+
+    local timestamps=()
+    local img ts
+    for img in "${images[@]}"; do
+        ts=$(podman image inspect "$img" --format '{{.Created}}' 2>/dev/null || echo "0")
+        timestamps+=("$ts"$'\t'"$img")
+    done
+
+    local sorted=()
+    while IFS=$'\t' read -r _ img; do
+        sorted+=("$img")
+    done < <(printf '%s\n' "${timestamps[@]}" | sort -r)
+
+    for ((i=keep-1; i<${#sorted[@]}; i++)); do
+        echo "Removing old project image '${sorted[$i]}'" >&2
+        podman rmi "${sorted[$i]}" >/dev/null 2>&1 || true
+    done
+}
+
+# One-shot cleanup: remove stopped containers, yolo images, dangling images.
+do_prune() {
+    local c_count=0 i_count=0 d_count=0
+
+    while IFS= read -r cid; do
+        [ -z "$cid" ] && continue
+        podman rm "$cid" 2>/dev/null && ((c_count++)) || true
+    done < <(podman ps -a --filter "status=exited" -q 2>/dev/null)
+
+    while IFS= read -r img; do
+        [ -z "$img" ] && continue
+        [ "$img" = "yolo-base" ] || [ "$img" = "yolo-base:latest" ] && continue
+        podman rmi "$img" 2>/dev/null && ((i_count++)) || true
+    done < <(podman images --filter "reference=yolo-*" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
+
+    while IFS= read -r img; do
+        [ -z "$img" ] && continue
+        podman rmi "$img" 2>/dev/null && ((d_count++)) || true
+    done < <(podman images --filter "dangling=true" -q 2>/dev/null)
+
+    if [ "$c_count" -gt 0 ] || [ "$i_count" -gt 0 ] || [ "$d_count" -gt 0 ]; then
+        echo "Pruned: $c_count container(s), $i_count image(s), $d_count dangling layer(s)" >&2
+    else
+        echo "Nothing to clean." >&2
+    fi
+
     exit 0
 }
 
@@ -339,6 +444,7 @@ WORKTREE_MODE="ask"
 USE_NVIDIA=0
 USE_CONFIG=1
 FORCE_REBUILD=0
+USE_LAST_IMAGE=0
 HARNESS_CLI=""        # set by --harness=, overrides config HARNESS=
 
 # Initialize config arrays
@@ -413,6 +519,13 @@ while [ $# -gt 0 ]; do
         --rebuild)
             FORCE_REBUILD=1
             shift
+            ;;
+        --last-image)
+            USE_LAST_IMAGE=1
+            shift
+            ;;
+        --prune)
+            do_prune
             ;;
         --anonymized-paths)
             # Removed in the multi-harness refactor: container paths are now
@@ -590,7 +703,22 @@ resolve_image() {
     [ "$has_user_setup" -eq 1 ] && hash_input+="|user|$(cat "$yolo_dir/user-setup.sh")"
     local hash
     hash=$(printf '%s' "$hash_input" | sha256_cmd | cut -c1-12)
-    local derived_image="yolo-${hash}"
+    local proj_name
+    proj_name=$(sanitize_name "$(basename "$PWD")")
+    local derived_image="yolo-${proj_name}-${hash}"
+
+    # --last-image: skip cache/build, use the previous project image
+    if [ "$USE_LAST_IMAGE" -eq 1 ]; then
+        local prev
+        prev=$(find_previous_project_image "$proj_name")
+        if [ -z "$prev" ]; then
+            echo "Error: --last-image requested but only one or zero project images exist" >&2
+            echo "       Build at least two images for this project to use --last-image." >&2
+            exit 1
+        fi
+        echo "$prev"
+        return
+    fi
 
     # Check cache (skip if --rebuild)
     if [ "$FORCE_REBUILD" -eq 0 ] && podman image exists "$derived_image" 2>/dev/null; then
@@ -629,6 +757,9 @@ resolve_image() {
     fi
     echo "Project image '$derived_image' built successfully." >&2
 
+    # Auto-prune: keep the 2 most recent images for this project
+    prune_old_project_images "$proj_name" "$derived_image" 2
+
     echo "$derived_image"
 }
 
@@ -637,7 +768,7 @@ IMAGE_NAME=$(resolve_image)
 # Give a meaningful name based on PWD and the PID to help identifying
 # all those podman containers
 # Note: leading periods and underscores are stripped as they're not allowed in container names
-name=$( echo "$PWD-$$" | sed -e "s,^$HOME/,,g" -e "s,[^a-zA-Z0-9_.-],_,g" -e "s,^[._]*,," )
+name=$(sanitize_name "$PWD-$$")
 
 # Pre-create the host source dir for every bind mount so the first run on a
 # new machine doesn't fail with "no such file" before podman gets a chance to
@@ -793,6 +924,21 @@ build_harness_extra_mount_args() {
     done
 }
 build_harness_extra_mount_args
+
+# Pre-run: remove any stopped containers from this project so they don't
+# accumulate disk space. Containers from previous yolo runs that crashed
+# or disconnected uncleanly are safe to remove.
+run_cleanup() {
+    # Find stopped containers with the same project directory prefix and remove them.
+    # The project prefix is '$PWD-' sanitized the same way as container names.
+    local proj_prefix
+    proj_prefix=$(echo "$PWD" | sed -e "s,^$HOME/,,g" -e "s,[^a-zA-Z0-9_.-],_,g" -e "s,^[._]*,,")
+    while IFS= read -r cid; do
+        [ -z "$cid" ] && continue
+        podman rm "$cid" >/dev/null 2>&1 || true
+    done < <(podman ps -a --filter "name=${proj_prefix}-" --filter "status=exited" -q 2>/dev/null)
+}
+run_cleanup
 
 podman run --log-driver=none -it --rm \
     "${USERNS_ARGS[@]}" \
