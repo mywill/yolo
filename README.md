@@ -1,6 +1,6 @@
 # yolo — containerized AI coding harnesses
 
-Run **claude** or **opencode** inside a podman container with permission prompts skipped. One launcher, one image (`yolo-base`), interchangeable harnesses. (**codex** is planned but not yet enabled in this build — see "Planned" below.)
+Run **claude**, **opencode**, or **pi** inside a podman container with permission prompts skipped. One launcher, one image (`yolo-base`), interchangeable harnesses. (**codex** is planned but not yet enabled in this build — see "Planned" below.)
 
 The container is the isolation boundary, not the harness. The harness's "skip all permission prompts" flag is injected automatically.
 
@@ -14,16 +14,17 @@ cd yolo
 ./setup-yolo.sh
 ```
 
-`setup-yolo.sh` builds `yolo-base` (claude + opencode pre-installed; codex deferred), installs `yolo` to `~/.local/bin`, and installs the yolo skill to `~/.claude/skills/yolo/` and `~/.agents/skills/yolo/`. Ensure `~/.local/bin` is on `$PATH`.
+`setup-yolo.sh` builds `yolo-base` (claude + opencode + pi pre-installed; codex deferred), installs `yolo` to `~/.local/bin`, and installs the yolo skill to `~/.claude/skills/yolo/` and `~/.agents/skills/yolo/`. Ensure `~/.local/bin` is on `$PATH`.
 
 Flags: `--build=auto|yes|no`, `--install=auto|yes|no`. Idempotent.
 
 ## Harnesses
 
-| Harness    | Yolo-mode signal                                             | Host config dir(s)                              | Default auth env vars forwarded                                                               |
-| ---------- | ------------------------------------------------------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `claude`   | CLI flag `--dangerously-skip-permissions`                    | `~/.claude`                                     | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`                             |
-| `opencode` | env `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true` (force-set) | `~/.config/opencode`, `~/.local/share/opencode` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
+| Harness    | Yolo-mode signal                                             | Host config dir(s)                                              | Default auth env vars forwarded                                                               |
+| ---------- | ------------------------------------------------------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `claude`   | CLI flag `--dangerously-skip-permissions`                    | `~/.claude`                                                     | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`                             |
+| `opencode` | env `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true` (force-set) | `~/.config/opencode`, `~/.local/share/opencode`                 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
+| `pi`       | (none — container is the boundary)                           | `~/.pi/agent`                                                   | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
 
 "Forwarded" means `-e VAR` with no value — podman picks up the host value. Export the keys on your host; they appear inside the container.
 
@@ -55,6 +56,7 @@ The codex (OpenAI Codex CLI) harness is plumbed end-to-end but deferred in this 
 ```bash
 yolo                          # claude (default harness)
 yolo --harness=opencode
+yolo --harness=pi
 # yolo --harness=codex        # planned, not yet enabled
 yolo --rebuild                # force rebuild of the project's derived image
 yolo --last-image             # use previous project image as fallback
@@ -158,7 +160,7 @@ Sourced as bash on every run. Auto-created on first run in a git repo. Run `yolo
 
 | Variable              | Type   | Default  | Effect                                                                                                                                          |
 | --------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HARNESS`             | string | `claude` | Selects harness (`claude` or `opencode`; codex planned). Overridden by `--harness=`.                                                            |
+| `HARNESS`             | string | `claude` | Selects harness (`claude`, `opencode`, or `pi`; codex planned). Overridden by `--harness=`.                                                            |
 | `YOLO_PODMAN_VOLUMES` | array  | `()`     | Extra mounts. Each entry passes through `expand_volume`.                                                                                        |
 | `YOLO_PODMAN_OPTIONS` | array  | `()`     | Prepended to `podman run` args.                                                                                                                 |
 | `YOLO_HARNESS_ARGS`   | array  | `()`     | Prepended to the active harness's args.                                                                                                         |

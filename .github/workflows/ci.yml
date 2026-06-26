@@ -44,6 +44,8 @@ jobs:
         run: podman run --rm yolo-base claude --help
       - name: Smoke-test container (opencode)
         run: podman run --rm yolo-base opencode --help
+      - name: Smoke-test container (pi)
+        run: podman run --rm yolo-base pi --help
       # codex smoke-test deferred — re-add once codex is re-enabled in the Dockerfile
       # - name: Smoke-test container (codex)
       #   run: podman run --rm yolo-base codex --help

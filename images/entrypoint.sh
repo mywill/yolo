@@ -39,6 +39,11 @@ case "${YOLO_HARNESS:-}" in
             timeout --foreground 120 bash -c 'curl -fsSL https://opencode.ai/install | bash' </dev/null >/dev/null || true
         fi
         ;;
+    pi)
+        if [ "${PI_VERSION:-latest}" = "latest" ]; then
+            timeout --foreground 120 npm install -g --prefix /home/agent/.npm-global --ignore-scripts "@earendil-works/pi-coding-agent@latest" </dev/null >/dev/null || true
+        fi
+        ;;
 esac
 
 trap - INT

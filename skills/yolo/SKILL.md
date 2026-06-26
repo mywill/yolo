@@ -1,11 +1,13 @@
 ---
 name: yolo
-description: Help users install, configure, modify, or troubleshoot yolo — a containerized multi-harness AI coding launcher (claude, opencode; codex planned) using podman with per-project `.yolo/` setup scripts and `.git/yolo/config`. Use for installing yolo (`setup-yolo.sh`, podman version, NVIDIA CDI), switching harness (`--harness=` flag or `HARNESS=` config key), adding `.yolo/` to a project (root vs user stage, rust/python/node/tauri), editing `.git/yolo/config` (volumes, podman options, harness args, worktree mode), and diagnosing failures (missing base image, SSH push, ownership with podman <4.3, GPU not detected, cache not rebuilding).
+description: Help users install, configure, modify, or troubleshoot yolo — a containerized multi-harness AI coding launcher (claude, opencode, pi; codex planned) using podman with per-project `.yolo/` setup scripts and `.git/yolo/config`. Use for installing yolo (`setup-yolo.sh`, podman version, NVIDIA CDI), switching harness (`--harness=` flag or `HARNESS=` config key), adding `.yolo/` to a project (root vs user stage, rust/python/node/tauri), editing `.git/yolo/config` (volumes, podman options, harness args, worktree mode), and diagnosing failures (missing base image, SSH push, ownership with podman <4.3, GPU not detected, cache not rebuilding).
 ---
 
 # yolo
 
-`yolo` runs an AI coding harness — `claude` (default) or `opencode` — inside a podman container with the harness's "skip all permission prompts" flag. Isolation is the container, not the harness. The CLI is `yolo` (`~/.local/bin/yolo`); the launcher is one bash file (`bin/yolo`); the prebuilt image is `yolo-base` (FROM `debian:bookworm`, claude + opencode installed).
+`yolo` runs an AI coding harness — `claude` (default), `opencode`, or `pi` — inside a podman container with the harness's "skip all permission prompts" flag. Isolation is the container, not the harness. The CLI is `yolo` (`~/.local/bin/yolo`); the launcher is one bash file (`bin/yolo`); the prebuilt image is `yolo-base` (FROM `debian:bookworm`, claude + opencode + pi installed).
+
+> **codex is planned but not yet enabled.** `yolo --harness=codex` exits with "planned but not yet enabled" — the launcher knows about it but the install is commented out in `images/Dockerfile`. Re-enable instructions live in `SPEC.md` §10.
 
 > **codex is planned but not yet enabled.** `yolo --harness=codex` exits with "planned but not yet enabled" — the launcher knows about it but the install is commented out in `images/Dockerfile`. Re-enable instructions live in `SPEC.md` §10.
 
@@ -15,7 +17,8 @@ description: Help users install, configure, modify, or troubleshoot yolo — a c
 - **rw mounts (host → container)**: `$(pwd)` at the same host path, plus the active harness's config dir(s) at fixed `/home/agent/...` targets:
   - claude: `$HOME/.claude → /home/agent/.claude`
   - opencode: `$HOME/.config/opencode → /home/agent/.config/opencode` and `$HOME/.local/share/opencode → /home/agent/.local/share/opencode`
-- **ro mounts (both harnesses cross-mount each other's data)**: `$HOME/.claude → /home/agent/.claude` and `$HOME/.agents/skills → /home/agent/.agents/skills` for opencode; `$HOME/.config/opencode → /home/agent/.config/opencode` and `$HOME/.local/share/opencode → /home/agent/.local/share/opencode` for claude. Every harness sees every other harness's config and skills regardless of which is active.
+  - pi: `$HOME/.pi/agent → /home/agent/.pi/agent`
+- **ro mounts (all harnesses cross-mount each other's data)**: `$HOME/.claude`, `$HOME/.config/opencode`, `$HOME/.local/share/opencode`, `$HOME/.pi/agent`, and `$HOME/.agents/skills` are mounted read-only into every other harness's container. Every harness sees every other harness's config, skills, and prompts regardless of which is active.
 - **ro mount**: `$HOME/.gitconfig` at `/tmp/.gitconfig`.
 - **Not mounted**: `~/.ssh`, host root. `git push` over SSH fails by default.
 - **Why fixed container paths**: keeps the in-container layout independent of the host `$HOME` (e.g. `/home/alice` vs `/home/bob`). Harnesses that fall back to `$HOME` (opencode) find their data because `$HOME=/home/agent` always.
@@ -27,6 +30,7 @@ Four-tier precedence, highest first:
 
 ```bash
 yolo --harness=opencode       # 1. CLI flag
+yolo --harness=pi             #     (also accepts pi)
 ```
 
 ```ini
@@ -38,7 +42,7 @@ HARNESS="opencode"             # 2. per-project default
 HARNESS=opencode yolo          # 3. shell env one-shot
 ```
 
-Default is `claude` (4). `HARNESS=codex` is accepted by the parser but exits with "planned but not yet enabled" until codex is re-enabled.
+Default is `claude` (4). `HARNESS=codex` is accepted by the parser but exits with "planned but not yet enabled" until codex is re-enabled. `HARNESS=pi` is fully active.
 
 `YOLO_HARNESS_ARGS` in config applies to whichever harness is active. `YOLO_CLAUDE_ARGS` is **deprecated** — if set, contents merge into `YOLO_HARNESS_ARGS` and a stderr warning is printed on each invocation.
 

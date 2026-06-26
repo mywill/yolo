@@ -9,7 +9,7 @@
 #   - fork-specific .yolo/-based image derivation (resolve_image)
 #   - claude --name= auto-injection
 #   - config file sourcing
-#   - multi-harness dispatch (claude/opencode; codex deferred — see SPEC.md §10)
+#   - multi-harness dispatch (claude/opencode/pi; codex deferred — see SPEC.md §10)
 #     and HARNESS precedence
 #   - container-path mounts under /home/agent/... regardless of host $HOME
 #
@@ -743,7 +743,8 @@ yolo-mock-oldest:latest"
     [ "${#HARNESS_ENV_PASSTHROUGH[@]}" -eq 2 ]
     [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.config/opencode:/home/agent/.config/opencode:ro,z "* ]]
     [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.local/share/opencode:/home/agent/.local/share/opencode:ro,z "* ]]
-    [ "${#HARNESS_EXTRA_MOUNTS[@]}" -eq 2 ]
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.pi/agent:/home/agent/.pi/agent:ro,z "* ]]
+    [ "${#HARNESS_EXTRA_MOUNTS[@]}" -eq 3 ]
 }
 
 @test "select_harness:opencode sets opencode profile globals" {
@@ -761,6 +762,7 @@ yolo-mock-oldest:latest"
     [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.local/share/opencode:/home/agent/.local/share/opencode:z "* ]]
     [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.claude:/home/agent/.claude:ro,z "* ]]
     [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.agents/skills:/home/agent/.agents/skills:ro,z "* ]]
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.pi/agent:/home/agent/.pi/agent:ro,z "* ]]
     [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" OPENAI_API_KEY "* ]]
     [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" ANTHROPIC_API_KEY "* ]]
     # Passthrough no longer carries OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS —
@@ -791,6 +793,31 @@ yolo-mock-oldest:latest"
     run_yolo --harness=bogus
     assert_failure
     assert_output --partial "Unknown harness 'bogus'"
+}
+
+@test "select_harness:pi sets pi profile globals" {
+    eval "$(extract_function select_harness)"
+    HOME=/h select_harness pi
+    [ "$HARNESS_CMD" = "pi" ]
+    [ "$HARNESS_HOST_DIR" = "/h/.pi/agent" ]
+    [ "$HARNESS_CONTAINER_DIR" = "/home/agent/.pi/agent" ]
+    [ "$HARNESS_CONFIG_ENV_NAME" = "PI_CODING_AGENT_DIR" ]
+    [ "$HARNESS_INJECT_NAME" = "0" ]
+    # pi has no yolo-mode arg — container is the boundary
+    [ "${#HARNESS_DEFAULT_ARGS[@]}" -eq 0 ]
+    # pi force-sets PI_TELEMETRY=0
+    [[ " ${HARNESS_FORCED_ENV[*]} " == *" PI_TELEMETRY=0 "* ]]
+    # pi extra mounts: host source -> /home/agent/... container target, all ro
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.claude:/home/agent/.claude:ro,z "* ]]
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.config/opencode:/home/agent/.config/opencode:ro,z "* ]]
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.local/share/opencode:/home/agent/.local/share/opencode:ro,z "* ]]
+    [[ " ${HARNESS_EXTRA_MOUNTS[*]} " == *" /h/.agents/skills:/home/agent/.agents/skills:ro,z "* ]]
+    # Passthrough matches opencode's provider key set
+    [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" OPENAI_API_KEY "* ]]
+    [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" ANTHROPIC_API_KEY "* ]]
+    [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" OPENROUTER_API_KEY "* ]]
+    [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" GROQ_API_KEY "* ]]
+    [[ " ${HARNESS_ENV_PASSTHROUGH[*]} " == *" GEMINI_API_KEY "* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -863,6 +890,101 @@ yolo-mock-oldest:latest"
     ! awk -F'\t' '/^run\t/ {
         for (i=1;i<NF;i++) if ($i=="-e" && $(i+1)=="CLAUDE_CODE_OAUTH_TOKEN") { found=1; exit }
     } END { exit !found }' "$MOCK_PODMAN_LOG"
+}
+
+# --harness=pi end-to-end
+# ---------------------------------------------------------------------------
+
+@test "--harness=pi runs pi as the container command" {
+    run_yolo --harness=pi
+    assert_success
+    awk -F'\t' '/^run\t/ {
+        for (i=1;i<=NF;i++) if ($i=="pi") { found=1; exit }
+    } END { exit !found }' "$MOCK_PODMAN_LOG"
+}
+
+@test "--harness=pi does NOT pass any --dangerously-skip-permissions-style flag" {
+    # Pi ships with full permissions; container is the safety boundary.
+    # No CLI flag or env var for "yolo mode" — verify none are injected.
+    run_yolo --harness=pi
+    assert_success
+    ! awk -F'\t' '/^run\t/ {
+        seen=0
+        for (i=1;i<=NF;i++) {
+            if ($i=="pi") seen=1
+            if (seen && $i=="--dangerously-skip-permissions") { found=1; exit }
+        }
+    } END { exit !found }' "$MOCK_PODMAN_LOG"
+    ! awk -F'\t' '/^run\t/ {
+        for (i=1;i<NF;i++) if ($i=="-e" && $(i+1) ~ /PI_YOLO/) { found=1; exit }
+    } END { exit !found }' "$MOCK_PODMAN_LOG"
+}
+
+@test "--harness=pi force-sets PI_TELEMETRY=0" {
+    run_yolo --harness=pi
+    assert_success
+    awk -F'\t' '/^run\t/ {
+        for (i=1;i<NF;i++) if ($i=="-e" && $(i+1)=="PI_TELEMETRY=0") { found=1; exit }
+    } END { exit !found }' "$MOCK_PODMAN_LOG"
+}
+
+@test "--harness=pi does NOT inject auto --name= into harness args" {
+    run_yolo --harness=pi
+    assert_success
+    ! awk -F'\t' '/^run\t/ {
+        seen=0
+        for (i=1;i<=NF;i++) {
+            if ($i=="pi") seen=1
+            if (seen && $i ~ /^--name=/) { found=1; exit }
+        }
+    } END { exit !found }' "$MOCK_PODMAN_LOG"
+}
+
+@test "--harness=pi mounts pi dir at /home/agent/.pi/agent" {
+    run_yolo --harness=pi
+    assert_success
+    podman_log_has_arg "$HOME/.pi/agent:/home/agent/.pi/agent:z"
+}
+
+@test "--harness=pi forwards provider API key env vars by name" {
+    run_yolo --harness=pi
+    assert_success
+    awk -F'\t' '/^run\t/ {
+        for (i=1;i<NF;i++) if ($i=="-e" && $(i+1)=="OPENAI_API_KEY") found=1
+        for (i=1;i<NF;i++) if ($i=="-e" && $(i+1)=="ANTHROPIC_API_KEY") found2=1
+    } END { exit !(found && found2) }' "$MOCK_PODMAN_LOG"
+}
+
+@test "--harness=pi forwards PI_CODING_AGENT_DIR" {
+    run_yolo --harness=pi
+    assert_success
+    awk -F'\t' '/^run\t/ {
+        for (i=1;i<=NF;i++) if ($i ~ /^PI_CODING_AGENT_DIR=/) { found=1; exit }
+    } END { exit !found }' "$MOCK_PODMAN_LOG"
+}
+
+@test "--harness=pi does NOT set CLAUDE_CONFIG_DIR" {
+    run_yolo --harness=pi
+    assert_success
+    ! awk -F'\t' '/^run\t/ {
+        for (i=1;i<=NF;i++) if ($i ~ /^CLAUDE_CONFIG_DIR=/) { found=1; exit }
+    } END { exit !found }' "$MOCK_PODMAN_LOG"
+}
+
+@test "--harness=pi does NOT set CODEX_HOME" {
+    run_yolo --harness=pi
+    assert_success
+    ! awk -F'\t' '/^run\t/ {
+        for (i=1;i<=NF;i++) if ($i ~ /^CODEX_HOME=/) { found=1; exit }
+    } END { exit !found }' "$MOCK_PODMAN_LOG"
+}
+
+@test "--harness=pi sets PI_CODING_AGENT_DIR exactly once" {
+    run_yolo --harness=pi
+    assert_success
+    run bash -c 'awk -F"\t" "/^run\t/ { for (i=1;i<=NF;i++) if (\$i ~ /^PI_CODING_AGENT_DIR=/) print \$i }" "$MOCK_PODMAN_LOG" | wc -l | tr -d " "'
+    assert_success
+    [ "$output" = "1" ]
 }
 
 @test "--harness=codex runs codex with bypass flag" {
@@ -938,6 +1060,11 @@ yolo-mock-oldest:latest"
     run_yolo --harness=opencode
     assert_success
     podman_log_has_arg "YOLO_HARNESS=opencode"
+
+    : >"$MOCK_PODMAN_LOG"
+    run_yolo --harness=pi
+    assert_success
+    podman_log_has_arg "YOLO_HARNESS=pi"
 }
 
 # ---------------------------------------------------------------------------
@@ -1111,6 +1238,16 @@ EOF
     assert_success
     podman_log_has_arg "$HOME/.claude:/home/agent/.claude:ro,z"
     podman_log_has_arg "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
+    podman_log_has_arg "$HOME/.pi/agent:/home/agent/.pi/agent:ro,z"
+}
+
+@test "--harness=pi mounts skills at /home/agent/... read-only" {
+    run_yolo --harness=pi
+    assert_success
+    podman_log_has_arg "$HOME/.claude:/home/agent/.claude:ro,z"
+    podman_log_has_arg "$HOME/.config/opencode:/home/agent/.config/opencode:ro,z"
+    podman_log_has_arg "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z"
+    podman_log_has_arg "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
 }
 
 @test "--harness=codex mounts skills at /home/agent/... read-only" {
@@ -1118,14 +1255,18 @@ EOF
     run_yolo --harness=codex
     assert_success
     podman_log_has_arg "$HOME/.claude:/home/agent/.claude:ro,z"
+    podman_log_has_arg "$HOME/.config/opencode:/home/agent/.config/opencode:ro,z"
+    podman_log_has_arg "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z"
+    podman_log_has_arg "$HOME/.pi/agent:/home/agent/.pi/agent:ro,z"
     podman_log_has_arg "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
 }
 
-@test "default claude harness mounts opencode dirs read-only for cross-access" {
+@test "default claude harness mounts opencode and pi dirs read-only for cross-access" {
     run_yolo
     assert_success
     podman_log_has_arg "$HOME/.config/opencode:/home/agent/.config/opencode:ro,z"
     podman_log_has_arg "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z"
+    podman_log_has_arg "$HOME/.pi/agent:/home/agent/.pi/agent:ro,z"
 }
 
 @test "default claude harness does NOT add overlapping .claude/skills ro mount" {
@@ -1238,18 +1379,19 @@ EOF
     # Catches binary-not-on-PATH regressions at build time instead of
     # container exec time. Codex is excluded while deferred; when re-enabled
     # (SPEC.md §10), restore `command -v codex` here.
-    grep -q 'command -v claude.*command -v opencode' "$PROJECT_ROOT/images/Dockerfile"
+    grep -q 'command -v claude.*command -v opencode.*command -v pi' "$PROJECT_ROOT/images/Dockerfile"
     # And the deferred codex check must NOT be active.
     ! grep -qE '^[[:space:]]*RUN[[:space:]]+command -v claude.*command -v opencode.*command -v codex' "$PROJECT_ROOT/images/Dockerfile"
 }
 
-@test "Dockerfile: codex/opencode/claude versions are persisted as ENV (not just ARG)" {
+@test "Dockerfile: codex/opencode/claude/pi versions are persisted as ENV (not just ARG)" {
     # ARG values don't survive into the running container, so the entrypoint
     # can't gate runtime updates on the build pin without ENV. CODEX_VERSION
     # is still wired even while the codex install is commented out so
     # re-enabling stays a one-touch change.
     grep -q 'ENV CODEX_VERSION=\$CODEX_VERSION' "$PROJECT_ROOT/images/Dockerfile"
     grep -q 'ENV OPENCODE_VERSION=\$OPENCODE_VERSION' "$PROJECT_ROOT/images/Dockerfile"
+    grep -q 'ENV PI_VERSION=\$PI_VERSION' "$PROJECT_ROOT/images/Dockerfile"
 }
 
 @test "Dockerfile: codex install block stays commented while deferred" {

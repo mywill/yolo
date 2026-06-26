@@ -26,8 +26,8 @@ unrecognized tokens are treated as `HARNESS_ARGS`.
 
 | Flag                  | Default  | Effect                                                                                          |
 |-----------------------|----------|-------------------------------------------------------------------------------------------------|
-| `-h`, `--help`        | —        | Print help, exit 0.                                                                             |
-| `--harness=NAME`      | `claude` | Select harness. `NAME` ∈ {`claude`, `opencode`}. `codex` is recognized by the parser but currently exits with a "planned but not yet enabled" error (see §10). Also accepts `--harness NAME`. |
+| `-h`, `--help`              | —        | Print help, exit 0.                                                                             |
+| `--harness=NAME`            | `claude` | Select harness. `NAME` ∈ {`claude`, `opencode`, `pi`}. `codex` is recognized by the parser but currently exits with a "planned but not yet enabled" error (see §10). Also accepts `--harness NAME`. |
 | `--entrypoint=CMD`    | —        | Replace in-container command, bypassing the harness profile (no default args, no auto `--name`). Also accepts `--entrypoint CMD`. |
 | `--worktree=MODE`     | `ask`    | `MODE` ∈ {`ask`, `bind`, `skip`, `error`}; anything else is a hard error. Also accepts `--worktree MODE`. |
 | `--nvidia`            | off      | Add `--device nvidia.com/gpu=all --security-opt label=disable`.                                 |
@@ -83,7 +83,7 @@ Sourced as bash. Recognized:
 
 | Variable                | Type    | Effect                                                          |
 |-------------------------|---------|-----------------------------------------------------------------|
-| `HARNESS`               | string  | Selects the harness: `claude` or `opencode`. (`codex` deferred — see §10.) Overridden by `--harness=`. |
+| `HARNESS`               | string  | Selects the harness: `claude`, `opencode`, or `pi`. (`codex` deferred — see §10.) Overridden by `--harness=`. |
 | `YOLO_PODMAN_VOLUMES`   | array   | Each entry runs through `expand_volume`, added as `-v`.         |
 | `YOLO_PODMAN_OPTIONS`   | array   | Prepended to user-supplied podman args.                         |
 | `YOLO_HARNESS_ARGS`     | array   | Prepended to user-supplied harness args (active for any harness). |
@@ -191,17 +191,17 @@ unused `yolo-*` images (excluding `yolo-base`), and dangling layers.
 `bin/yolo` selects one profile and uses it to compose mounts, env, and
 the in-container command. Profiles for the currently active harnesses:
 
-| Field                  | `claude`                     | `opencode`                                                          |
-|------------------------|------------------------------|---------------------------------------------------------------------|
-| In-container command   | `claude`                     | `opencode`                                                          |
-| Default args (yolo)    | `--dangerously-skip-permissions` | (none — env `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true` is force-set instead) |
-| Auto `--name=` injected | yes                         | no                                                                  |
-| Host source dir(s)     | `$HOME/.claude`              | `$HOME/.config/opencode` + `$HOME/.local/share/opencode`            |
-| Container target dir(s) | `/home/agent/.claude`       | `/home/agent/.config/opencode` + `/home/agent/.local/share/opencode` |
-| Config env var set     | `CLAUDE_CONFIG_DIR=/home/agent/.claude` | (none — XDG resolves to `/home/agent/.config/opencode`)   |
-| Extra ro mounts (host → container) | `$HOME/.config/opencode → /home/agent/.config/opencode`, `$HOME/.local/share/opencode → /home/agent/.local/share/opencode` | `$HOME/.claude → /home/agent/.claude`, `$HOME/.agents/skills → /home/agent/.agents/skills` |
-| Env vars forwarded (`-e NAME`) | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
-| Env vars force-set (`-e KEY=VALUE`) | (none)                  | `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true`                        |
+| Field                  | `claude`                     | `opencode`                                                          | `pi`                                                                                                  |
+|------------------------|------------------------------|---------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| In-container command   | `claude`                     | `opencode`                                                          | `pi`                                                                                                  |
+| Default args (yolo)    | `--dangerously-skip-permissions` | (none — env `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true` is force-set instead) | (none — pi ships with full permissions; the container IS the safety boundary)                         |
+| Auto `--name=` injected | yes                         | no                                                                  | no                                                                                                    |
+| Host source dir(s)     | `$HOME/.claude`              | `$HOME/.config/opencode` + `$HOME/.local/share/opencode`            | `$HOME/.pi/agent`                                                                                     |
+| Container target dir(s) | `/home/agent/.claude`       | `/home/agent/.config/opencode` + `/home/agent/.local/share/opencode` | `/home/agent/.pi/agent`                                                                              |
+| Config env var set     | `CLAUDE_CONFIG_DIR=/home/agent/.claude` | (none — XDG resolves to `/home/agent/.config/opencode`)   | `PI_CODING_AGENT_DIR=/home/agent/.pi/agent`                                                          |
+| Extra ro mounts (host → container) | `$HOME/.config/opencode → /home/agent/.config/opencode`, `$HOME/.local/share/opencode → /home/agent/.local/share/opencode`, `$HOME/.pi/agent → /home/agent/.pi/agent` | `$HOME/.claude → /home/agent/.claude`, `$HOME/.pi/agent → /home/agent/.pi/agent`, `$HOME/.agents/skills → /home/agent/.agents/skills` | `$HOME/.claude → /home/agent/.claude`, `$HOME/.config/opencode → /home/agent/.config/opencode`, `$HOME/.local/share/opencode → /home/agent/.local/share/opencode`, `$HOME/.agents/skills → /home/agent/.agents/skills` |
+| Env vars forwarded (`-e NAME`) | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
+| Env vars force-set (`-e KEY=VALUE`) | (none)                  | `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true`                        | `PI_TELEMETRY=0`                                                                                      |
 
 (The `codex` profile is implemented but currently deferred. See §10.)
 
@@ -296,6 +296,7 @@ command yolo passes in:
 |----------------|---------------------------------------------------------------|
 | `claude`       | `claude update`                                               |
 | `opencode`     | `curl -fsSL https://opencode.ai/install \| bash`              |
+| `pi`           | `npm install -g --prefix /home/agent/.npm-global --ignore-scripts @earendil-works/pi-coding-agent@latest` |
 | (unset)        | none                                                          |
 
 (The `codex` branch is implemented but commented out in
@@ -356,11 +357,14 @@ shellcheck bin/yolo setup-yolo.sh images/entrypoint.sh
 - `resolve_image`: no `.yolo/`, empty `.yolo/`, root-only, user-only with
   same content (different hash), both, determinism, single-byte
   sensitivity, cache hit, `--rebuild`, missing base image.
-- `select_harness` profile dispatch for claude and opencode; unknown
+- `select_harness` profile dispatch for claude, opencode, and pi; unknown
   name rejection; codex returns the "planned but not yet enabled" error
   (see §10).
 - `--harness=opencode` end-to-end: in-container command, default args,
   mounts, env passthrough, absence of claude-specific bits.
+- `--harness=pi` end-to-end: in-container command, no dangerous-skip
+  args, mounts (pi's own rw + cross-harness ro), env passthrough matching
+  opencode's set, PI_TELEMETRY=0 force-set, PI_CODING_AGENT_DIR set.
 - Harness selection precedence: CLI > config > shell env > default.
 - `YOLO_HARNESS_ARGS` applied for any harness. `YOLO_CLAUDE_ARGS`
   deprecated alias: contents merged in, warning fires, `YOLO_HARNESS_ARGS`
@@ -377,7 +381,9 @@ shellcheck bin/yolo setup-yolo.sh images/entrypoint.sh
 
 Changes to the contracts above must update the corresponding tests.
 
-## 10. Deferred: codex
+## 10. Deferred: codex — Enabled: pi
+
+### Codex (deferred)
 
 The codex (OpenAI Codex CLI) harness is plumbed end-to-end in
 `bin/yolo`, `images/Dockerfile`, and `images/entrypoint.sh` but
@@ -419,6 +425,39 @@ Uncomment, in this order:
    disabled"` lines (grep for that exact string).
 6. This section: delete it; restore codex columns in §5/§7 tables and
    the codex bullets in §9.
+
+### Pi (enabled)
+
+Pi (https://pi.dev) is an active harness alongside claude and opencode.
+The pi column in §5 documents its profile.
+
+Key design decisions covered in the implementation:
+
+- **No yolo-mode signal.** Pi ships with full permissions by design and
+  relies on container isolation for safety, matching yolo's model exactly.
+  No `--dangerously-skip-permissions` equivalent exists in pi; the profile
+  injects no default args.
+- **Install method:** `npm install -g --prefix /home/agent/.npm-global --ignore-scripts`
+  into the same dedicated npm prefix reserved for the (deferred) codex
+  harness. The `--prefix` form avoids writing to `~/.npmrc`, which means it
+  doesn't trigger the nvm conflict described in the codex deferral note.
+  The pi installer's own (`curl -fsSL https://pi.dev/install.sh`) internal
+  mechanism is identical — the direct npm call is used in the Dockerfile
+  because it is more predictable and avoids installer-wizard code paths.
+- **Telemetry:** `PI_TELEMETRY=0` is force-set inside the container to
+  disable the anonymous install/update telemetry ping. Users can re-enable
+  via `YOLO_PODMAN_OPTIONS+=(--env=PI_TELEMETRY=1)` or `-e` on the CLI.
+- **Extension sharing.** Pi's user-global state at `$HOME/.pi/agent` is
+  mounted rw, so extensions installed via `pi install npm:...` persist
+  across runs and are visible to every project. The claude and opencode
+  profiles also mount this directory ro so they can read pi's installed
+  skills tree. The shared agent-skills standard (`$HOME/.agents/skills/`)
+  is cross-mounted in all three active profiles.
+- **Provider keys:** The env-passthrough list matches opencode's set
+  (OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY,
+  GEMINI_API_KEY). Pi's 20+ additional providers are accessible via
+  `YOLO_PODMAN_OPTIONS` or `-e` on the CLI. Pi flags (e.g. `--offline`)
+  pass through `--` via the existing harness-args mechanism.
 
 The profile, when re-enabled, is:
 

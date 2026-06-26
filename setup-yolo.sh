@@ -137,7 +137,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "🚀 yolo Setup (multi-harness: claude, opencode; codex planned)"
+echo "🚀 yolo Setup (multi-harness: claude, opencode, pi; codex planned)"
 echo "================================================================"
 echo
 
@@ -376,7 +376,7 @@ fi
 if [ "$SHOULD_INSTALL" = false ]; then
     echo
     echo "Setup complete! Container image '$IMAGE_NAME' is ready."
-    echo "It includes: claude, opencode. (codex is planned but not yet enabled.)"
+    echo "It includes: claude, opencode, pi. (codex is planned but not yet enabled.)"
     echo
     echo "Run claude manually:"
     echo "  podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \\"
@@ -398,6 +398,7 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo "    -v \"\$HOME/.local/share/opencode:/home/agent/.local/share/opencode:z\" \\"
     echo "    -v \"\$HOME/.claude:/home/agent/.claude:ro,z\" \\"
     echo "    -v \"\$HOME/.agents/skills:/home/agent/.agents/skills:ro,z\" \\"
+    echo "    -v \"\$HOME/.pi/agent:/home/agent/.pi/agent:ro,z\" \\"
     echo "    -v \"\$HOME/.gitconfig:/tmp/.gitconfig:ro,z\" \\"
     echo "    -v \"\$(pwd):\$(pwd):z\" \\"
     echo "    -w \"\$(pwd)\" \\"
@@ -412,6 +413,28 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo "    $IMAGE_NAME \\"
     echo "    opencode"
     echo
+    echo "Run pi manually:"
+    echo "  podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \\"
+    echo "    -v \"\$HOME/.pi/agent:/home/agent/.pi/agent:z\" \\"
+    echo "    -v \"\$HOME/.claude:/home/agent/.claude:ro,z\" \\"
+    echo "    -v \"\$HOME/.config/opencode:/home/agent/.config/opencode:ro,z\" \\"
+    echo "    -v \"\$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z\" \\"
+    echo "    -v \"\$HOME/.agents/skills:/home/agent/.agents/skills:ro,z\" \\"
+    echo "    -v \"\$HOME/.gitconfig:/tmp/.gitconfig:ro,z\" \\"
+    echo "    -v \"\$(pwd):\$(pwd):z\" \\"
+    echo "    -w \"\$(pwd)\" \\"
+    echo "    -e PI_CODING_AGENT_DIR=/home/agent/.pi/agent \\"
+    echo "    -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \\"
+    echo "    -e PI_TELEMETRY=0 \\"
+    echo "    -e OPENAI_API_KEY \\"
+    echo "    -e ANTHROPIC_API_KEY \\"
+    echo "    -e OPENROUTER_API_KEY \\"
+    echo "    -e GROQ_API_KEY \\"
+    echo "    -e GEMINI_API_KEY \\"
+    echo "    -e YOLO_HARNESS=pi \\"
+    echo "    $IMAGE_NAME \\"
+    echo "    pi"
+    echo
     echo "Note: --userns=keep-id:uid=1000,gid=1000 requires podman >= 4.3."
     echo "On older podman use --user=\"\$(id -u):\$(id -g)\" --userns=keep-id instead"
     echo "(file ownership only works correctly if your host UID is 1000)."
@@ -419,6 +442,7 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo "The yolo launcher does all of this for you:"
     echo "  yolo                        # claude (default)"
     echo "  yolo --harness=opencode"
+    echo "  yolo --harness=pi"
     echo "  # yolo --harness=codex     # planned, not yet enabled"
     exit 0
 fi
@@ -456,6 +480,7 @@ if [ "$SHOULD_INSTALL" = true ]; then
     echo "  3. Run one of:"
     echo "       yolo                       # claude (default harness)"
     echo "       yolo --harness=opencode"
+    echo "       yolo --harness=pi"
     echo "       # yolo --harness=codex    # planned, not yet enabled"
     echo
     echo "Pass extra podman options before -- and harness arguments after:"
