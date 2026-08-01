@@ -7,14 +7,14 @@ show_help() {
     cat << 'EOF'
 Usage: yolo [OPTIONS] [-- HARNESS_ARGS...]
 
-Run an AI coding harness (claude, opencode, or pi; codex planned) in YOLO mode
+Run an AI coding harness (claude, opencode, pi, or hermes; codex planned) in YOLO mode
 (auto-approve all actions) inside a container.
 
 OPTIONS:
     -h, --help           Show this help message
-    --harness=NAME       Which harness to run: claude (default), opencode, or pi.
-                          (codex is planned but not yet enabled.)
-                          Also accepts --harness NAME.
+    --harness=NAME       Which harness to run: claude (default), opencode, pi, or hermes.
+                           (codex is planned but not yet enabled.)
+                           Also accepts --harness NAME.
     --entrypoint=CMD     Override the container entrypoint, bypassing the harness
                          profile. Also accepts --entrypoint CMD.
     --worktree=MODE      Git worktree handling: ask, bind, skip, error
@@ -38,6 +38,8 @@ OPTIONS:
 EXAMPLES:
     yolo                              # Run claude (default harness)
     yolo --harness=opencode           # Run opencode
+    yolo --harness=pi                 # Run pi
+    yolo --harness=hermes             # Run hermes
     yolo --nvidia                     # With GPU support
     yolo --rebuild                    # Force rebuild project image
     yolo --last-image                 # Use previous image as fallback
@@ -71,7 +73,7 @@ PROJECT CONFIGURATION:
     Run 'yolo --install-config' to create a template.
 
     The config file is a bash script that can set:
-    - HARNESS: claude, opencode, or pi (overridden by --harness=). codex is planned.
+    - HARNESS: claude, opencode, pi, or hermes (overridden by --harness=). codex is planned.
     - YOLO_PODMAN_VOLUMES: array of volume mounts
     - YOLO_PODMAN_OPTIONS: array of podman options
     - YOLO_HARNESS_ARGS: array of arguments for the active harness
@@ -193,7 +195,7 @@ print_config_template() {
 # This file is sourced as a bash script by yolo
 # Location: .git/yolo/config
 
-# Which harness to run. One of: claude (default), opencode, pi.
+# Which harness to run. One of: claude (default), opencode, pi, hermes.
 # (codex is planned but not yet enabled in this build of yolo.)
 # Overridden by `yolo --harness=NAME`.
 # HARNESS="claude"
@@ -429,8 +431,28 @@ claude)
             HARNESS_ENV_PASSTHROUGH=("OPENAI_API_KEY" "ANTHROPIC_API_KEY" "OPENROUTER_API_KEY" "GROQ_API_KEY" "GEMINI_API_KEY")
             HARNESS_FORCED_ENV=("PI_TELEMETRY=0")
             ;;
+        hermes)
+            HARNESS_CMD="hermes"
+            HARNESS_HOST_DIR="$HOME/.hermes"
+            HARNESS_CONTAINER_DIR="/home/agent/.hermes-data"
+            HARNESS_CONFIG_ENV_NAME="HERMES_HOME"
+            HARNESS_DEFAULT_ARGS=("--yolo")
+            HARNESS_INJECT_NAME=0
+            HARNESS_ENV_PASSTHROUGH=(
+                "ANTHROPIC_API_KEY" "OPENAI_API_KEY" "OPENROUTER_API_KEY"
+                "GOOGLE_API_KEY" "GEMINI_API_KEY" "GROQ_API_KEY"
+                "DEEPSEEK_API_KEY" "MISTRAL_API_KEY" "HF_TOKEN"
+            )
+            HARNESS_EXTRA_MOUNTS=(
+                "$HOME/.claude:/home/agent/.claude:ro,z"
+                "$HOME/.config/opencode:/home/agent/.config/opencode:ro,z"
+                "$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z"
+                "$HOME/.pi/agent:/home/agent/.pi/agent:ro,z"
+                "$HOME/.agents/skills:/home/agent/.agents/skills:ro,z"
+            )
+            ;;
         *)
-            echo "Error: Unknown harness '$name'. Valid: claude, opencode, pi (codex planned)." >&2
+            echo "Error: Unknown harness '$name'. Valid: claude, opencode, pi, hermes (codex planned)." >&2
             exit 1
             ;;
     esac
@@ -486,9 +508,9 @@ while [ $# -gt 0 ]; do
         --install-config)
             install_config
             ;;
-        --harness)
+        --harness)                                                                    
             if [ $# -lt 2 ] || [[ "$2" == -* ]]; then
-                echo "Error: --harness requires a value (claude, opencode, or pi; codex planned)" >&2
+                echo "Error: --harness requires a value (claude, opencode, pi, or hermes; codex planned)" >&2
                 exit 1
             fi
             HARNESS_CLI="$2"
