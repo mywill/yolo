@@ -25,6 +25,7 @@ Flags: `--build=auto|yes|no`, `--install=auto|yes|no`. Idempotent.
 | `claude`   | CLI flag `--dangerously-skip-permissions`                    | `~/.claude`                                                     | `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`                             |
 | `opencode` | env `OPENCODE_DANGEROUSLY_SKIP_PERMISSIONS=true` (force-set) | `~/.config/opencode`, `~/.local/share/opencode`                 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
 | `pi`       | (none — container is the boundary)                           | `~/.pi/agent`                                                   | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY` |
+| `hermes`   | CLI flag `--yolo`                                            | `~/.hermes`                                                     | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `HF_TOKEN` |
 
 "Forwarded" means `-e VAR` with no value — podman picks up the host value. Export the keys on your host; they appear inside the container.
 
@@ -57,6 +58,7 @@ The codex (OpenAI Codex CLI) harness is plumbed end-to-end but deferred in this 
 yolo                          # claude (default harness)
 yolo --harness=opencode
 yolo --harness=pi
+yolo --harness=hermes
 # yolo --harness=codex        # planned, not yet enabled
 yolo --rebuild                # force rebuild of the project's derived image
 yolo --last-image             # use previous project image as fallback

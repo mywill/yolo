@@ -8,6 +8,7 @@ ARG CLAUDE_CODE_VERSION=latest
 ARG OPENCODE_VERSION=latest
 ARG CODEX_VERSION=latest
 ARG PI_VERSION=latest
+ARG HERMES_VERSION=latest
 
 # Install basic development tools.
 # tini is included as a minimal init process to properly reap zombie processes
@@ -71,12 +72,14 @@ RUN mkdir -p \
   /home/agent/.config/opencode \
   /home/agent/.local/share/opencode \
   /home/agent/.pi/agent \
+  /home/agent/.hermes \
   && chown -R agent:agent \
   /workspace \
   /home/agent/.claude \
   /home/agent/.config \
   /home/agent/.local \
-  /home/agent/.pi
+  /home/agent/.pi \
+  /home/agent/.hermes
 
 WORKDIR /workspace
 
@@ -94,6 +97,7 @@ ARG CLAUDE_CODE_VERSION
 ARG OPENCODE_VERSION
 ARG CODEX_VERSION
 ARG PI_VERSION
+ARG HERMES_VERSION
 
 # Persist the resolved versions into the runtime image so entrypoint.sh can
 # decide whether to auto-update on container start. When a build pin is set
@@ -102,6 +106,7 @@ ARG PI_VERSION
 ENV CODEX_VERSION=$CODEX_VERSION
 ENV OPENCODE_VERSION=$OPENCODE_VERSION
 ENV PI_VERSION=$PI_VERSION
+ENV HERMES_VERSION=$HERMES_VERSION
 
 # Set the default shell to zsh rather than sh
 ENV SHELL=/bin/zsh
@@ -169,11 +174,18 @@ RUN mkdir -p /home/agent/.npm-global \
   && npm install -g --ignore-scripts --prefix /home/agent/.npm-global \
     "@earendil-works/pi-coding-agent@${PI_VERSION}"
 
+# Install Hermes Agent (https://hermes-agent.nousresearch.com).
+# The curl-to-bash installer clones the repo into ~/.hermes/hermes-agent/,
+# creates a venv, installs Python dependencies, and symlinks the `hermes`
+# command to ~/.local/bin/hermes. The installer is non-interactive when
+# piped through curl.
+RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+
 # Build-time sanity check: every active harness must resolve on PATH. Catches
 # drift in upstream installer behavior (e.g., binary moves to a new default
 # dir) before the image ships, rather than failing at container exec time.
 # Codex is excluded while deferred — re-add it when re-enabling above.
-RUN command -v claude && command -v opencode && command -v pi
+RUN command -v claude && command -v opencode && command -v pi && command -v hermes
 
 # Entrypoint just sets up tini and execs the command yolo passes in.
 # No harness is launched by default — yolo always supplies one (claude,

@@ -29,8 +29,8 @@ show_help() {
 Usage: setup-yolo.sh [OPTIONS]
 
 Setup script for the yolo multi-harness containerized environment.
-Builds the prebuilt image '$IMAGE_NAME' with claude and opencode installed
-(codex is planned but not yet enabled), and (optionally) installs the
+Builds the prebuilt image '$IMAGE_NAME' with claude, opencode, and pi installed
+(hermes is also installed; codex is planned but not yet enabled), and (optionally) installs the
 'yolo' launcher to ~/.local/bin.
 
 OPTIONS:
@@ -376,7 +376,7 @@ fi
 if [ "$SHOULD_INSTALL" = false ]; then
     echo
     echo "Setup complete! Container image '$IMAGE_NAME' is ready."
-    echo "It includes: claude, opencode, pi. (codex is planned but not yet enabled.)"
+    echo "It includes: claude, opencode, pi, hermes. (codex is planned but not yet enabled.)"
     echo
     echo "Run claude manually:"
     echo "  podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \\"
@@ -413,7 +413,7 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo "    $IMAGE_NAME \\"
     echo "    opencode"
     echo
-    echo "Run pi manually:"
+echo "Run pi manually:"
     echo "  podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \\"
     echo "    -v \"\$HOME/.pi/agent:/home/agent/.pi/agent:z\" \\"
     echo "    -v \"\$HOME/.claude:/home/agent/.claude:ro,z\" \\"
@@ -434,6 +434,33 @@ if [ "$SHOULD_INSTALL" = false ]; then
     echo "    -e YOLO_HARNESS=pi \\"
     echo "    $IMAGE_NAME \\"
     echo "    pi"
+    echo
+    echo "Run hermes manually:"
+    echo "  podman run -it --rm --userns=keep-id:uid=1000,gid=1000 \\"
+    echo "    -v \"\$HOME/.hermes:/home/agent/.hermes-data:z\" \\"
+    echo "    -v \"\$HOME/.claude:/home/agent/.claude:ro,z\" \\"
+    echo "    -v \"\$HOME/.config/opencode:/home/agent/.config/opencode:ro,z\" \\"
+    echo "    -v \"\$HOME/.local/share/opencode:/home/agent/.local/share/opencode:ro,z\" \\"
+    echo "    -v \"\$HOME/.pi/agent:/home/agent/.pi/agent:ro,z\" \\"
+    echo "    -v \"\$HOME/.agents/skills:/home/agent/.agents/skills:ro,z\" \\"
+    echo "    -v \"\$HOME/.gitconfig:/tmp/.gitconfig:ro,z\" \\"
+    echo "    -v \"\$(pwd):\$(pwd):z\" \\"
+    echo "    -w \"\$(pwd)\" \\"
+    echo "    -e HERMES_HOME=/home/agent/.hermes-data \\"
+    echo "    -e GIT_CONFIG_GLOBAL=/tmp/.gitconfig \\"
+    echo "    -e HERMES_YOLO_MODE=1 \\"
+    echo "    -e ANTHROPIC_API_KEY \\"
+    echo "    -e OPENAI_API_KEY \\"
+    echo "    -e OPENROUTER_API_KEY \\"
+    echo "    -e GOOGLE_API_KEY \\"
+    echo "    -e GEMINI_API_KEY \\"
+    echo "    -e GROQ_API_KEY \\"
+    echo "    -e DEEPSEEK_API_KEY \\"
+    echo "    -e MISTRAL_API_KEY \\"
+    echo "    -e HF_TOKEN \\"
+    echo "    -e YOLO_HARNESS=hermes \\"
+    echo "    $IMAGE_NAME \\"
+echo "  hermes --yolo"
     echo
     echo "Note: --userns=keep-id:uid=1000,gid=1000 requires podman >= 4.3."
     echo "On older podman use --user=\"\$(id -u):\$(id -g)\" --userns=keep-id instead"
@@ -476,11 +503,12 @@ if [ "$SHOULD_INSTALL" = true ]; then
     echo
     echo "To start using yolo:"
     echo "  1. Make sure ~/.local/bin is in your PATH (restart shell if needed)"
-    echo "  2. Navigate to any project directory"
+echo "  2. Navigate to any project directory"
     echo "  3. Run one of:"
     echo "       yolo                       # claude (default harness)"
     echo "       yolo --harness=opencode"
     echo "       yolo --harness=pi"
+    echo "       yolo --harness=hermes"
     echo "       # yolo --harness=codex    # planned, not yet enabled"
     echo
     echo "Pass extra podman options before -- and harness arguments after:"

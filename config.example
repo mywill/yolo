@@ -8,7 +8,7 @@
 # HARNESS
 # ============================================================================
 # Which AI coding harness to run inside the container.
-# One of: claude (default), opencode, pi.
+# One of: claude (default), opencode, pi, hermes.
 # (codex is planned but not yet enabled in this build of yolo; setting
 # HARNESS="codex" will error out at startup with a "planned but not yet
 # enabled" message. See SPEC.md §10.)

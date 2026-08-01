@@ -1,11 +1,11 @@
 ---
 name: yolo
-description: Help users install, configure, modify, or troubleshoot yolo — a containerized multi-harness AI coding launcher (claude, opencode, pi; codex planned) using podman with per-project `.yolo/` setup scripts and `.git/yolo/config`. Use for installing yolo (`setup-yolo.sh`, podman version, NVIDIA CDI), switching harness (`--harness=` flag or `HARNESS=` config key), adding `.yolo/` to a project (root vs user stage, rust/python/node/tauri), editing `.git/yolo/config` (volumes, podman options, harness args, worktree mode), and diagnosing failures (missing base image, SSH push, ownership with podman <4.3, GPU not detected, cache not rebuilding).
+description: Help users install, configure, modify, or troubleshoot yolo — a containerized multi-harness AI coding launcher (claude, opencode, pi, hermes; codex planned) using podman with per-project `.yolo/` setup scripts and `.git/yolo/config`. Use for installing yolo (`setup-yolo.sh`, podman version, NVIDIA CDI), switching harness (`--harness=` flag or `HARNESS=` config key), adding `.yolo/` to a project (root vs user stage, rust/python/node/tauri), editing `.git/yolo/config` (volumes, podman options, harness args, worktree mode), and diagnosing failures (missing base image, SSH push, ownership with podman <4.3, GPU not detected, cache not rebuilding).
 ---
 
 # yolo
 
-`yolo` runs an AI coding harness — `claude` (default), `opencode`, or `pi` — inside a podman container with the harness's "skip all permission prompts" flag. Isolation is the container, not the harness. The CLI is `yolo` (`~/.local/bin/yolo`); the launcher is one bash file (`bin/yolo`); the prebuilt image is `yolo-base` (FROM `debian:bookworm`, claude + opencode + pi installed).
+`yolo` runs an AI coding harness — `claude` (default), `opencode`, `pi`, or `hermes` — inside a podman container with the harness's "skip all permission prompts" flag. Isolation is the container, not the harness. The CLI is `yolo` (`~/.local/bin/yolo`); the launcher is one bash file (`bin/yolo`); the prebuilt image is `yolo-base` (FROM `debian:bookworm`, claude + opencode + pi + hermes installed).
 
 > **codex is planned but not yet enabled.** `yolo --harness=codex` exits with "planned but not yet enabled" — the launcher knows about it but the install is commented out in `images/Dockerfile`. Re-enable instructions live in `SPEC.md` §10.
 

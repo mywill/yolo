@@ -44,6 +44,16 @@ case "${YOLO_HARNESS:-}" in
             timeout --foreground 120 npm install -g --prefix /home/agent/.npm-global --ignore-scripts "@earendil-works/pi-coding-agent@latest" </dev/null >/dev/null || true
         fi
         ;;
+    hermes)
+        # Hermes is pre-installed in the image at ~/.hermes/hermes-agent/.
+        # The data dir ($HERMES_HOME) is mounted from the host. On first
+        # run the host dir may be empty, so check if the venv exists.
+        if [ ! -d "$HOME/.hermes/hermes-agent/venv" ]; then
+            timeout --foreground 300 curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+        elif [ "${HERMES_VERSION:-latest}" = "latest" ]; then
+            timeout --foreground 120 hermes update </dev/null >/dev/null || true
+        fi
+        ;;
 esac
 
 trap - INT
